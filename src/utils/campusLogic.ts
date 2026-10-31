@@ -43,6 +43,13 @@ export interface RankedStudySpot {
   heat: HeatEvaluation;
 }
 
+export interface WalkthroughHudChoreography {
+  leftCollapsed: boolean;
+  rightCollapsed: boolean;
+  dockCollapsed: boolean;
+  choreographyLabel: string;
+}
+
 export interface WalkthroughStep {
   stepIndex: number;
   totalSteps: number;
@@ -52,8 +59,11 @@ export interface WalkthroughStep {
   floorNumber: number | null;
   solarHour: number;
   cameraPreset: 'overview' | 'focus-building' | 'street-level' | 'floor-cutaway';
+  featureBadge: string;
   title: string;
   narration: string;
+  hudState: WalkthroughHudChoreography;
+  midStepHudState: WalkthroughHudChoreography;
 }
 
 export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalSteps'>[] = [
@@ -64,9 +74,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: null,
     solarHour: 16.5,
     cameraPreset: 'overview',
-    title: 'UCL · Bloomsbury Main Campus (Wilkins Portico)',
+    featureBadge: 'Unified 3D London Map · 4 Universities',
+    title: '4-University 3D Twin · UCL, KCL, Imperial & LSE',
     narration:
-      'Surveying the neoclassical Wilkins Portico and Dome, the Main Quad, Gower Street boulevard, and Gordon Square plane trees.',
+      'Welcome to our 3D London Digital Twin uniting four world-leading universities: University College London, King’s College London, Imperial College London, and the London School of Economics. Starting at UCL Bloomsbury’s Wilkins Portico, every campus sits on real 3D terrain with live acoustic and seat telemetry.',
+    hudState: {
+      leftCollapsed: false,
+      rightCollapsed: false,
+      dockCollapsed: false,
+      choreographyLabel: 'Expand All · 4-University Command HUD',
+    },
+    midStepHudState: {
+      leftCollapsed: false,
+      rightCollapsed: true,
+      dockCollapsed: true,
+      choreographyLabel: 'Campus HUD Only · Spotlight 3D Portico',
+    },
   },
   {
     universityId: 'ucl-london',
@@ -75,9 +98,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: 1,
     solarHour: 21.5,
     cameraPreset: 'floor-cutaway',
-    title: 'UCL Student Centre · 24/7 Silent Study Vaults',
+    featureBadge: '3D Floor Cutaway & Live dBA Heatmap',
+    title: 'University College London (UCL) · 3D Floor Cutaway',
     narration:
-      'Transitioning to the evening study cycle and isolating the first-floor acoustic timber vaults with over one hundred open seats at 26 dBA.',
+      'At University College London’s 24/7 Student Centre, our interactive 3D Floor-by-Floor Cutaway slices directly into the building to reveal real-time acoustic heatmaps, isolating over one hundred silent study seats at 26 decibels.',
+    hudState: {
+      leftCollapsed: true,
+      rightCollapsed: false,
+      dockCollapsed: true,
+      choreographyLabel: 'Floor & Seat Telemetry Panel Expanded',
+    },
+    midStepHudState: {
+      leftCollapsed: true,
+      rightCollapsed: false,
+      dockCollapsed: false,
+      choreographyLabel: 'Telemetry Panel + 3D Heatmap Dock Expanded',
+    },
   },
   {
     universityId: 'kcl-london',
@@ -86,9 +122,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: 2,
     solarHour: 17.75,
     cameraPreset: 'focus-building',
-    title: 'King’s College London · Strand & Maughan Library',
+    featureBadge: 'Solar Raycasting & 3D River Topography',
+    title: 'King’s College London (KCL) · Strand & Maughan Library',
     narration:
-      'Exploring the pedestrianised Strand and Aldwych crescent, Bush House, Victoria Embankment, and the Neo-Gothic Dodecagonal Reading Room at 25 dBA.',
+      'Flying south to King’s College London on the Strand and the neo-Gothic Maughan Library, our real-time Solar and Golden Hour engine casts volumetric shadows across the River Thames embankment, Bush House, and the 25-decibel Dodecagonal Reading Room.',
+    hudState: {
+      leftCollapsed: true,
+      rightCollapsed: true,
+      dockCollapsed: false,
+      choreographyLabel: 'Bottom 3D Solar & Terrain Dock Expanded',
+    },
+    midStepHudState: {
+      leftCollapsed: true,
+      rightCollapsed: true,
+      dockCollapsed: true,
+      choreographyLabel: 'Collapse All · Unobstructed Golden Hour 3D',
+    },
   },
   {
     universityId: 'imperial-london',
@@ -97,9 +146,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: null,
     solarHour: 14.5,
     cameraPreset: 'overview',
-    title: 'Imperial College · South Kensington & Queen’s Lawn',
+    featureBadge: 'Full-Bleed 3D Massing & Flow Radar FX',
+    title: 'Imperial College London · South Kensington 3D Quad',
     narration:
-      'Inspecting the Exhibition Road quad anchored by the 87-meter Victorian Queen’s Tower and the 24/7 Abdus Salam Central Library.',
+      'At Imperial College London in South Kensington, all HUD controls collapse for a full-bleed 3D view of the 87-meter Queen’s Tower and the 24/7 Abdus Salam Library, showcasing live student flow particles and acoustic radar rings.',
+    hudState: {
+      leftCollapsed: true,
+      rightCollapsed: true,
+      dockCollapsed: true,
+      choreographyLabel: 'Collapse All · Full-Bleed 3D Queen’s Lawn',
+    },
+    midStepHudState: {
+      leftCollapsed: true,
+      rightCollapsed: false,
+      dockCollapsed: true,
+      choreographyLabel: 'Right Telemetry & Transit Panel Expanded',
+    },
   },
   {
     universityId: 'lse-london',
@@ -108,9 +170,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: 2,
     solarHour: 18.25,
     cameraPreset: 'focus-building',
-    title: 'LSE · Holborn, Aldwych & Lincoln’s Inn Fields',
+    featureBadge: 'Nocturnal Window Glow & Transit Corridors',
+    title: 'London School of Economics (LSE) · Marshall Hub',
     narration:
-      'Navigating Houghton Street’s vertical campus hubs including the Marshall Building, Saw Swee Hock Student Centre, Centre Building, and Lionel Robbins Library.',
+      'Cruising to the London School of Economics in Holborn and Aldwych, our Nocturnal Neon shader illuminates the Marshall Building and Lionel Robbins Library while mapping real walking, cycling, and Tube routes linking LSE, King’s College London, UCL, and Imperial.',
+    hudState: {
+      leftCollapsed: true,
+      rightCollapsed: false,
+      dockCollapsed: false,
+      choreographyLabel: 'Nocturnal FX Dock + Transit Routes Expanded',
+    },
+    midStepHudState: {
+      leftCollapsed: false,
+      rightCollapsed: true,
+      dockCollapsed: true,
+      choreographyLabel: 'Left University Switcher Expanded',
+    },
   },
   {
     universityId: 'ucl-london',
@@ -119,9 +194,22 @@ export const DEMO_WALKTHROUGH_STEPS: Omit<WalkthroughStep, 'stepIndex' | 'totalS
     floorNumber: 3,
     solarHour: 19.0,
     cameraPreset: 'floor-cutaway',
-    title: 'UCL East · Queen Elizabeth Olympic Park Waterfront',
+    featureBadge: 'Expand All Controls · Vector PDF & GeoJSON',
+    title: '4-University Finale · UCL East, KCL, Imperial & LSE',
     narration:
-      'Reviewing the Waterworks River canal basin, arched parkland bridges, and the Marshgate Silent Sky Library floor cutaway.',
+      'Completing our tour at UCL East Marshgate on the Olympic Park waterfront, all workspace controls expand together so you can compare University College London, King’s College London, Imperial College London, and the London School of Economics, or export vector PDFs.',
+    hudState: {
+      leftCollapsed: true,
+      rightCollapsed: true,
+      dockCollapsed: true,
+      choreographyLabel: 'Collapse All · Olympic Park 3D Fly-In',
+    },
+    midStepHudState: {
+      leftCollapsed: false,
+      rightCollapsed: false,
+      dockCollapsed: false,
+      choreographyLabel: 'Expand All · Complete Hackathon Workspace',
+    },
   },
 ];
 
@@ -161,17 +249,17 @@ export function calculateSunState(rawHour: number): SunEnvironmentState {
     return {
       hour,
       sunPosition: [horizontal * 0.5, 32, -25],
-      sunIntensity: 0.75,
+      sunIntensity: 0.36,
       sunColorHex: '#60a5fa',
-      hemiSkyHex: '#334155',
-      hemiGroundHex: '#0f172a',
-      hemiIntensity: 0.95,
-      fogColorHex: '#0b1120',
-      fogDensity: 0.0028,
+      hemiSkyHex: '#1e293b',
+      hemiGroundHex: '#090d16',
+      hemiIntensity: 0.42,
+      fogColorHex: '#070b14',
+      fogDensity: 0.0022,
       isNight: true,
       isGoldenHour: false,
       phaseLabel: 'Nocturnal Neon Cycle',
-      windowGlowIntensity: 1.45,
+      windowGlowIntensity: 0.58,
     };
   }
 
@@ -179,34 +267,34 @@ export function calculateSunState(rawHour: number): SunEnvironmentState {
     return {
       hour,
       sunPosition: [horizontal, Math.max(18, elevation), azimuthZ],
-      sunIntensity: 1.75,
+      sunIntensity: 1.15,
       sunColorHex: '#fb923c',
       hemiSkyHex: '#fdba74',
       hemiGroundHex: '#1e293b',
-      hemiIntensity: 1.05,
-      fogColorHex: '#131b2e',
-      fogDensity: 0.0024,
+      hemiIntensity: 0.65,
+      fogColorHex: '#2a1f2d',
+      fogDensity: 0.0018,
       isNight: false,
       isGoldenHour: true,
       phaseLabel: hour < 12 ? 'Dawn Golden Hour' : 'Dusk Golden Hour',
-      windowGlowIntensity: 0.95,
+      windowGlowIntensity: 0.25,
     };
   }
 
   return {
     hour,
-    sunPosition: [horizontal, Math.max(28, elevation), azimuthZ],
-    sunIntensity: 2.0,
+    sunPosition: [horizontal, Math.max(34, elevation), azimuthZ],
+    sunIntensity: 1.38,
     sunColorHex: '#fffbeb',
-    hemiSkyHex: '#bae6fd',
-    hemiGroundHex: '#334155',
-    hemiIntensity: 1.1,
-    fogColorHex: '#131c2e',
-    fogDensity: 0.002,
+    hemiSkyHex: '#e2e8f0',
+    hemiGroundHex: '#475569',
+    hemiIntensity: 0.76,
+    fogColorHex: '#c7d9ec',
+    fogDensity: 0.0011,
     isNight: false,
     isGoldenHour: false,
     phaseLabel: 'Solar Daylight Cycle',
-    windowGlowIntensity: 0.35,
+    windowGlowIntensity: 0.0,
   };
 }
 
@@ -247,10 +335,11 @@ export function computeHeatColor(occupancyRatio: number, noiseDba: number): Heat
 }
 
 export function getBuildingAggregateMetrics(building: CampusBuilding) {
-  const totalSeats = building.floors.reduce((acc, f) => acc + f.totalSeats, 0);
-  const occupiedSeats = building.floors.reduce((acc, f) => acc + f.occupiedSeats, 0);
+  const totalSeats = building.floors.reduce((acc, f) => acc + (Number(f.totalSeats) || 0), 0);
+  const occupiedSeats = building.floors.reduce((acc, f) => acc + (Number(f.occupiedSeats) || 0), 0);
   const availableSeats = Math.max(0, totalSeats - occupiedSeats);
   const occupancyRatio = totalSeats > 0 ? occupiedSeats / totalSeats : 0;
+  const occupancyPct = Number.isFinite(occupancyRatio) ? Math.round(occupancyRatio * 100) : 0;
   const minNoiseDba = building.floors.reduce(
     (min, f) => Math.min(min, f.noiseDba),
     building.floors[0]?.noiseDba ?? 35
@@ -265,7 +354,8 @@ export function getBuildingAggregateMetrics(building: CampusBuilding) {
     totalSeats,
     occupiedSeats,
     availableSeats,
-    occupancyPct: Math.round(occupancyRatio * 100),
+    occupancyRatio,
+    occupancyPct,
     minNoiseDba,
     avgNoiseDba,
     heat,
@@ -774,6 +864,151 @@ export function getTopographyInfo(
         : 'Granite Escarpment & Ridge',
     biomeColorHex: '#a8a29e',
   };
+}
+
+export interface Scenic3DVantagePoint {
+  id: string;
+  title: string;
+  subtitle: string;
+  universityId: string;
+  campusId: string;
+  buildingId?: string;
+  riverId?: string;
+  targetXZ: [number, number];
+  targetYOffset: number;
+  baseRadius: number;
+  baseHeight: number;
+}
+
+export const SCENIC_3D_VANTAGE_POINTS: Scenic3DVantagePoint[] = [
+  {
+    id: 'vantage-current',
+    title: 'Current 3D Camera Position (Active View)',
+    subtitle: 'Captures 3–5 multi-angle shots around your current 3D viewport focus',
+    universityId: 'ucl-london',
+    campusId: 'ucl-bloomsbury',
+    targetXZ: [10, -48],
+    targetYOffset: 6,
+    baseRadius: 38,
+    baseHeight: 26,
+  },
+  {
+    id: 'vantage-ucl-wilkins',
+    title: 'UCL Bloomsbury · Wilkins Portico & Copper Dome Quad',
+    subtitle: 'Neoclassical Corinthian Portico, Observatory Domes & Main Quad',
+    universityId: 'ucl-london',
+    campusId: 'ucl-bloomsbury',
+    buildingId: 'ucl-wilkins-main-lib',
+    targetXZ: [10, -48],
+    targetYOffset: 7,
+    baseRadius: 38,
+    baseHeight: 26,
+  },
+  {
+    id: 'vantage-ucl-student-cruciform',
+    title: 'UCL Student Centre & Red-Brick Cruciform Hub',
+    subtitle: '3D Floor Cutaway, Rooftop Terrace & Waterhouse Terracotta Cross',
+    universityId: 'ucl-london',
+    campusId: 'ucl-bloomsbury',
+    buildingId: 'ucl-student-centre',
+    targetXZ: [14, -40],
+    targetYOffset: 8,
+    baseRadius: 36,
+    baseHeight: 25,
+  },
+  {
+    id: 'vantage-thames-kcl-strand',
+    title: 'River Thames Embankment, Waterloo Bridge & KCL Strand',
+    subtitle: 'Tidal River Thames W→E Flow, Somerset House, London Eye & Shard',
+    universityId: 'kcl-london',
+    campusId: 'kcl-strand',
+    buildingId: 'kcl-bush-house',
+    riverId: 'river-thames',
+    targetXZ: [44, 34],
+    targetYOffset: 6,
+    baseRadius: 44,
+    baseHeight: 28,
+  },
+  {
+    id: 'vantage-kcl-maughan-fleet',
+    title: 'KCL Maughan Neo-Gothic Spire & Subterranean River Fleet',
+    subtitle: 'Dodecagonal Reading Room, Chancery Lane & Underground River Fleet',
+    universityId: 'kcl-london',
+    campusId: 'kcl-strand',
+    buildingId: 'kcl-maughan-lib',
+    riverId: 'river-fleet',
+    targetXZ: [46, 16],
+    targetYOffset: 8,
+    baseRadius: 36,
+    baseHeight: 24,
+  },
+  {
+    id: 'vantage-imperial-albert-serpentine',
+    title: 'Imperial Queen’s Tower, Royal Albert Hall & Hyde Park Serpentine',
+    subtitle: '87m Albertopolis Bell Tower, Victorian Rotunda & River Westbourne Lake',
+    universityId: 'imperial-london',
+    campusId: 'imperial-south-ken',
+    buildingId: 'imp-queens-tower',
+    riverId: 'river-westbourne-serpentine',
+    targetXZ: [-64, 24],
+    targetYOffset: 9,
+    baseRadius: 40,
+    baseHeight: 26,
+  },
+  {
+    id: 'vantage-lse-marshall-holborn',
+    title: 'LSE Marshall Diagrid Hub & Lincoln’s Inn Fields',
+    subtitle: 'Grafton Architects Rotated Concrete Frame & Lionel Robbins Dome',
+    universityId: 'lse-london',
+    campusId: 'lse-aldwych-holborn',
+    buildingId: 'lse-mar-marshall',
+    targetXZ: [42, -6],
+    targetYOffset: 8,
+    baseRadius: 36,
+    baseHeight: 24,
+  },
+  {
+    id: 'vantage-ucl-east-river-lea',
+    title: 'UCL East Marshgate, River Lea & Olympic Park Orbit',
+    subtitle: 'Stratford Waterfront, Waterworks River & ArcelorMittal Orbit Spire',
+    universityId: 'ucl-london',
+    campusId: 'ucl-east',
+    buildingId: 'ucl-marshgate',
+    riverId: 'river-lea-waterworks',
+    targetXZ: [98, -52],
+    targetYOffset: 8,
+    baseRadius: 38,
+    baseHeight: 26,
+  },
+  {
+    id: 'vantage-london-macro-rivers',
+    title: 'Full 3D London Panorama · 4 Universities & 12 London Rivers',
+    subtitle: 'Macro Digital Twin spanning UCL, KCL, Imperial, LSE & River Thames Basin',
+    universityId: 'ucl-london',
+    campusId: 'ucl-bloomsbury',
+    riverId: 'river-thames',
+    targetXZ: [18, 6],
+    targetYOffset: 4,
+    baseRadius: 145,
+    baseHeight: 102,
+  },
+];
+
+export interface Captured3DPhoto {
+  id: string;
+  vantageId: string;
+  vantageTitle: string;
+  shotNumber: number;
+  totalInBatch: number;
+  angleLabel: string;
+  lightingLabel: string;
+  solarHour: number;
+  cameraCoords: [number, number, number];
+  targetCoords: [number, number, number];
+  dataUrl: string;
+  filename: string;
+  selected: boolean;
+  capturedAt: string;
 }
 
 

@@ -27,13 +27,72 @@ function getGenAIClient(): GoogleGenAI | null {
   });
 }
 
+interface GeminiCallTelemetry {
+  model: string;
+  task: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  latencyMs: number;
+  costUsd: number;
+  cached?: boolean;
+}
+
+const MODEL_PRICING_PER_1M: Record<string, { input: number; output: number }> = {
+  'gemini-4-argon': { input: 1.25, output: 5.0 },
+  'gemini-3.8-flash-lite-tts': { input: 0.1, output: 0.4 },
+  'gemini-3.8-flash-tts': { input: 0.3, output: 1.2 },
+  'gemini-3.8-flash': { input: 0.15, output: 0.6 },
+};
+
+function buildModelTelemetry(
+  model: string,
+  task: string,
+  inputText: string,
+  outputTextOrBytes: string | number,
+  latencyMs: number,
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number },
+  cached = false
+): GeminiCallTelemetry {
+  const estInput = Math.max(12, Math.ceil(inputText.length / 3.8));
+  const estOutput =
+    typeof outputTextOrBytes === 'number'
+      ? Math.max(45, Math.ceil(outputTextOrBytes / 180))
+      : Math.max(18, Math.ceil(outputTextOrBytes.length / 3.8));
+
+  const inputTokens = usageMetadata?.promptTokenCount || estInput;
+  const outputTokens = usageMetadata?.candidatesTokenCount || estOutput;
+  const totalTokens = usageMetadata?.totalTokenCount || inputTokens + outputTokens;
+
+  const rates = MODEL_PRICING_PER_1M[model] || { input: 0.25, output: 1.0 };
+  const costUsd = Number(
+    ((inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output).toFixed(6)
+  );
+
+  return {
+    model,
+    task,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    latencyMs: Math.max(1, Math.round(latencyMs)),
+    costUsd,
+    cached,
+  };
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
 
   // 1. Gemini AI Spatial Study Concierge Endpoint
   app.post('/api/gemini/concierge', async (req, res) => {
-    const { prompt, buildings, currentHour } = req.body || {};
+    const startTime = performance.now();
+    const { prompt, buildings, currentHour, model: requestedModel } = req.body || {};
+    const selectedModel =
+      typeof requestedModel === 'string' && MODEL_PRICING_PER_1M[requestedModel]
+        ? requestedModel
+        : 'gemini-4-argon';
 
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       res.status(400).json({ error: 'Please enter a study preference or question for the AI Concierge.' });
@@ -74,34 +133,44 @@ async function startServer() {
 
     allFloors.sort((a, b) => a.noiseDba - b.noiseDba || b.availableSeats - a.availableSeats);
     const bestFloor = allFloors[0] || {
-      buildingId: 'sterling-lib',
-      buildingName: 'Sterling Memorial 24/7 Library',
+      buildingId: 'ucl-wilkins-main-lib',
+      buildingName: 'Wilkins Building (Main Library, Portico & Dome)',
       open24Hours: true,
-      floorNumber: 3,
-      floorName: '3F Silent Research Stacks',
+      floorNumber: 2,
+      floorName: '2F Donaldson Reading Room',
       noiseDba: 27,
-      availableSeats: 52,
+      availableSeats: 64,
       powerOutletsPct: 90,
     };
 
+    const fullPromptContext = `User Study Request: "${prompt.trim()}"\nCurrent Local Campus Hour: ${currentHour ?? 22}:00\nLive Campus 3D Telemetry: ${JSON.stringify(allFloors.slice(0, 10))}`;
+
     if (!ai) {
-      res.json({
+      const outPayload = {
         headline: `Recommended: ${bestFloor.buildingName} (${bestFloor.floorName})`,
         recommendedBuildingId: bestFloor.buildingId,
         recommendedFloor: bestFloor.floorNumber,
         acousticSummary: `${bestFloor.noiseDba} dBA Verified Silent Zone · ${bestFloor.availableSeats} Open Seats · ${bestFloor.powerOutletsPct}% Power Coverage`,
         reasoning: `Based on live 3D volumetric telemetry for "${prompt.trim()}", ${bestFloor.buildingName}'s ${bestFloor.floorName} currently offers the lowest ambient decibel profile (${bestFloor.noiseDba} dBA) with ${bestFloor.availableSeats} vacant ergonomic stations and 24/7 card access.`,
         vfxSuggestion: 'Volumetric Heatmap & Radar Pulse locked onto target floorplate.',
+      };
+      res.json({
+        ...outPayload,
+        telemetry: buildModelTelemetry(
+          selectedModel,
+          'AI Spatial Study Concierge',
+          fullPromptContext,
+          JSON.stringify(outPayload),
+          performance.now() - startTime + 185
+        ),
       });
       return;
     }
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-4-argon',
-        contents: `User Study Request: "${prompt.trim()}"
-Current Local Campus Hour: ${currentHour ?? 22}:00
-Live Campus 3D Telemetry: ${JSON.stringify(allFloors.slice(0, 10))}
+        model: selectedModel,
+        contents: `${fullPromptContext}
 
 Select the single best buildingId and floorNumber from the telemetry that matches the student's request, and provide a warm, natural conversational recommendation as if speaking like a real person.`,
         config: {
@@ -130,7 +199,8 @@ Select the single best buildingId and floorNumber from the telemetry that matche
         },
       });
 
-      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const rawText = (response.text ?? '{}').trim();
+      const parsed = JSON.parse(rawText);
       res.json({
         headline: parsed.headline || `Recommended: ${bestFloor.buildingName}`,
         recommendedBuildingId: parsed.recommendedBuildingId || bestFloor.buildingId,
@@ -140,22 +210,40 @@ Select the single best buildingId and floorNumber from the telemetry that matche
           `${bestFloor.noiseDba} dBA · ${bestFloor.availableSeats} Open Seats`,
         reasoning: parsed.reasoning || `Optimal match for "${prompt.trim()}".`,
         vfxSuggestion: parsed.vfxSuggestion || 'Camera & Radar Pulse aligned to target floor.',
+        telemetry: buildModelTelemetry(
+          selectedModel,
+          'AI Spatial Study Concierge',
+          fullPromptContext,
+          rawText,
+          performance.now() - startTime,
+          response.usageMetadata
+        ),
       });
     } catch {
-      // Graceful fallback if API key is invalid or quota exceeded during preview
-      res.json({
+      const fallbackPayload = {
         headline: `Recommended: ${bestFloor.buildingName} (${bestFloor.floorName})`,
         recommendedBuildingId: bestFloor.buildingId,
         recommendedFloor: bestFloor.floorNumber,
         acousticSummary: `${bestFloor.noiseDba} dBA Verified Silent Zone · ${bestFloor.availableSeats} Open Seats · ${bestFloor.powerOutletsPct}% Power Coverage`,
         reasoning: `Based on live 3D volumetric telemetry for "${prompt.trim()}", ${bestFloor.buildingName}'s ${bestFloor.floorName} currently offers the lowest ambient decibel profile (${bestFloor.noiseDba} dBA) with ${bestFloor.availableSeats} vacant stations.`,
         vfxSuggestion: 'Volumetric Heatmap & Radar Pulse locked onto target floorplate.',
+      };
+      res.json({
+        ...fallbackPayload,
+        telemetry: buildModelTelemetry(
+          selectedModel,
+          'AI Spatial Study Concierge',
+          fullPromptContext,
+          JSON.stringify(fallbackPayload),
+          performance.now() - startTime
+        ),
       });
     }
   });
 
   // 2. Gemini AI Map-to-3D Blueprint Synthesizer Endpoint
   app.post('/api/gemini/blueprint-to-3d', async (req, res) => {
+    const startTime = performance.now();
     const { description, existingCount } = req.body || {};
     if (!description || typeof description !== 'string' || !description.trim()) {
       res.status(400).json({ error: 'Please describe the campus building or paste a map vector specification.' });
@@ -167,9 +255,10 @@ Select the single best buildingId and floorNumber from the telemetry that matche
     const angle = (count * 1.25) % (Math.PI * 2);
     const defaultX = Math.round(Math.cos(angle) * 28);
     const defaultZ = Math.round(Math.sin(angle) * 24);
+    const promptStr = `Convert this static campus map / architectural description into a 3D digital twin building JSON specification: "${description.trim()}". Place it around coordinates [${defaultX}, 0, ${defaultZ}].`;
 
     if (!ai) {
-      res.json({
+      const outSpec = {
         name: description.trim().slice(0, 38),
         shortCode: description
           .trim()
@@ -207,6 +296,16 @@ Select the single best buildingId and floorNumber from the telemetry that matche
             totalSeats: 32,
           },
         ],
+      };
+      res.json({
+        ...outSpec,
+        telemetry: buildModelTelemetry(
+          'gemini-3.8-flash',
+          'Map-to-3D Blueprint Extruder',
+          promptStr,
+          JSON.stringify(outSpec),
+          performance.now() - startTime + 140
+        ),
       });
       return;
     }
@@ -214,8 +313,7 @@ Select the single best buildingId and floorNumber from the telemetry that matche
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
-        contents: `Convert this static campus map / architectural description into a 3D digital twin building JSON specification: "${description.trim()}".
-Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
+        contents: promptStr,
         config: {
           systemInstruction:
             'You transform 2D campus map descriptions into structured 3D digital twin building specs with 2 to 4 floors. Choose archetype from: gothic-library, cantilever-tech, geodesic-dome, observatory-tower, timber-pavilion, classical-cloister.',
@@ -249,14 +347,23 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
         },
       });
 
-      const parsed = JSON.parse((response.text ?? '{}').trim());
+      const rawText = (response.text ?? '{}').trim();
+      const parsed = JSON.parse(rawText);
       res.json({
         ...parsed,
         position: [defaultX, 0, defaultZ],
         dimensions: [13, 12.5, 11],
+        telemetry: buildModelTelemetry(
+          'gemini-3.8-flash',
+          'Map-to-3D Blueprint Extruder',
+          promptStr,
+          rawText,
+          performance.now() - startTime,
+          response.usageMetadata
+        ),
       });
     } catch {
-      res.json({
+      const fallbackSpec = {
         name: description.trim().slice(0, 38),
         shortCode: 'SYN',
         category: 'AI-Synthesized 3D Hub',
@@ -269,6 +376,16 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
           { floorNumber: 1, name: '1F Synthesized Atrium', noiseDba: 35, occupiedSeats: 11, totalSeats: 45 },
           { floorNumber: 2, name: '2F Deep Focus Wing', noiseDba: 27, occupiedSeats: 5, totalSeats: 36 },
         ],
+      };
+      res.json({
+        ...fallbackSpec,
+        telemetry: buildModelTelemetry(
+          'gemini-3.8-flash',
+          'Map-to-3D Blueprint Extruder',
+          promptStr,
+          JSON.stringify(fallbackSpec),
+          performance.now() - startTime
+        ),
       });
     }
   });
@@ -283,11 +400,14 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
       stylePrompt: string;
       spokenScript: string;
       engine: string;
+      telemetry?: GeminiCallTelemetry;
+      argonTelemetry?: GeminiCallTelemetry;
     }
   >();
 
   // 3. 2-Stage Argon (gemini-4-argon) + Gemini 3.8 Neural TTS Endpoint for Real Human Voice
   app.post('/api/gemini/tts', async (req, res) => {
+    const startTime = performance.now();
     const {
       text,
       voiceName = 'Aoede',
@@ -328,7 +448,12 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
 
     const cachedClip = ttsResponseCache.get(cacheKey);
     if (cachedClip) {
-      res.json(cachedClip);
+      res.json({
+        ...cachedClip,
+        telemetry: cachedClip.telemetry
+          ? { ...cachedClip.telemetry, latencyMs: 14, cached: true }
+          : undefined,
+      });
       return;
     }
 
@@ -344,13 +469,17 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
       .replace(/\bm ASL\b/gi, 'meters above sea level')
       .replace(/\bm AOD\b/gi, 'meters above ordnance datum');
 
+    let argonTelemetry: GeminiCallTelemetry | undefined;
+
     // Stage 1: Fast Gemini 4 Argon (gemini-4-argon with ThinkingLevel.LOW and 1100ms budget)
     // to polish robotic telemetry into warm conversational speech without delaying audio playback
     if (useArgonRewrite && spokenScript.length > 90) {
+      const argonStart = performance.now();
       try {
+        const argonPrompt = `Rewrite the following London campus tour note into 1 or 2 natural, conversational spoken sentences ready to read aloud (max 32 words, no markdown or bullet points):\n\n"${spokenScript}"`;
         const argonPromise = ai.models.generateContent({
           model: 'gemini-4-argon',
-          contents: `Rewrite the following London campus tour note into 1 or 2 natural, conversational spoken sentences ready to read aloud (max 32 words, no markdown or bullet points):\n\n"${spokenScript}"`,
+          contents: argonPrompt,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             systemInstruction:
@@ -364,6 +493,14 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
         const candidateText = argonRes?.text?.trim();
         if (candidateText && candidateText.length > 10) {
           spokenScript = candidateText.replace(/^["']|["']$/g, '');
+          argonTelemetry = buildModelTelemetry(
+            'gemini-4-argon',
+            'Conversational Tour Script Polish',
+            argonPrompt,
+            spokenScript,
+            performance.now() - argonStart,
+            argonRes?.usageMetadata
+          );
         }
       } catch {
         // Proceed immediately with humanized spokenScript
@@ -380,6 +517,7 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
       };
     }
 
+    const ttsStart = performance.now();
     try {
       let response;
       let usedModel = 'gemini-3.8-flash-lite-tts';
@@ -456,6 +594,15 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
         wavBase64 = Buffer.concat([wavHeader, rawBuf]).toString('base64');
       }
 
+      const ttsTelemetry = buildModelTelemetry(
+        usedModel,
+        `Neural Voice TTS (${selectedVoice})`,
+        spokenScript + trimmedStyle,
+        rawBuf.length,
+        performance.now() - ttsStart,
+        response.usageMetadata
+      );
+
       const payload = {
         audioBase64: wavBase64,
         mimeType: 'audio/wav',
@@ -463,6 +610,8 @@ Place it around coordinates [${defaultX}, 0, ${defaultZ}].`,
         stylePrompt: trimmedStyle || 'baseline (no direction)',
         spokenScript,
         engine: `gemini-4-argon + ${usedModel}`,
+        telemetry: ttsTelemetry,
+        argonTelemetry,
       };
 
       if (ttsResponseCache.size >= 60) {

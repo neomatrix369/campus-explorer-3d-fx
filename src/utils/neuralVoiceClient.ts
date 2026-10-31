@@ -1,3 +1,5 @@
+import { recordGeminiCallTelemetry } from './geminiTelemetryTracker';
+
 export type GeminiNeuralVoiceName =
   | 'aoede-real'
   | 'aoede-baseline'
@@ -82,6 +84,7 @@ export const GEMINI_NEURAL_VOICES: NeuralVoiceOption[] = [
 ];
 
 const audioCache = new Map<string, string>();
+const inflightPrefetches = new Map<string, Promise<string | null>>();
 let sharedVoiceAudioCtx: AudioContext | null = null;
 const activeBufferSources = new Set<AudioBufferSourceNode>();
 const activeAudioElements = new Set<HTMLAudioElement>();
@@ -144,6 +147,13 @@ export function humanizeTextForSpeech(rawText: string): string {
     .replace(/\b3F\b/g, 'third floor')
     .replace(/\b4F\b/g, 'fourth floor')
     .replace(/\b5F\b/g, 'fifth floor')
+    .replace(/\b6F\b/g, 'sixth floor')
+    .replace(/\b7F\b/g, 'seventh floor')
+    .replace(/\b8F\b/g, 'eighth floor')
+    .replace(/\bB1\/B2\b/gi, 'basement levels one and two')
+    .replace(/\bB1\b/g, 'basement one')
+    .replace(/\bB2\b/g, 'basement two')
+    .replace(/\bGower St\b/g, 'Gower Street')
     .replace(/\bm ASL\b/gi, 'meters above sea level')
     .replace(/\bm AOD\b/gi, 'meters above sea level')
     .replace(/\bkm\b/g, 'kilometers')
@@ -151,6 +161,57 @@ export function humanizeTextForSpeech(rawText: string): string {
     .replace(/[·•|]/g, ', ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Pre-fetches and caches a neural TTS audio clip in the background without interrupting
+ * any currently playing speech, so upcoming walkthrough steps play with zero network lag.
+ */
+export async function prefetchGeminiNeuralVoice(
+  rawText: string,
+  voicePresetId: GeminiNeuralVoiceName = 'aoede-real',
+  skipArgonRewrite = false
+): Promise<void> {
+  if (!rawText || !rawText.trim()) return;
+  const humanized = humanizeTextForSpeech(rawText);
+  const voiceOption =
+    GEMINI_NEURAL_VOICES.find((v) => v.id === voicePresetId) || GEMINI_NEURAL_VOICES[0];
+  const useArgon = !skipArgonRewrite && voiceOption.id !== 'aoede-baseline';
+  const cacheKey = `${voiceOption.id}::${useArgon ? 'argon' : 'direct'}::${humanized}`;
+
+  if (audioCache.has(cacheKey) || inflightPrefetches.has(cacheKey)) {
+    return;
+  }
+
+  const fetchPromise = (async (): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/gemini/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: humanized,
+          voicePresetId: voiceOption.id,
+          voiceName: voiceOption.voiceName,
+          stylePrompt: voiceOption.styleDirection,
+          useArgonRewrite: useArgon,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.audioBase64) {
+        audioCache.set(cacheKey, data.audioBase64);
+        return data.audioBase64 as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      inflightPrefetches.delete(cacheKey);
+    }
+  })();
+
+  inflightPrefetches.set(cacheKey, fetchPromise);
+  await fetchPromise;
 }
 
 /**
@@ -252,7 +313,7 @@ function speakWithEnhancedBrowserFallback(
   text: string,
   voicePresetId: GeminiNeuralVoiceName,
   genId: number,
-  onStart?: () => void,
+  onStart?: (durationMs: number) => void,
   onEnd?: () => void
 ): void {
   if (genId !== speechGenerationId) return;
@@ -298,7 +359,7 @@ function speakWithEnhancedBrowserFallback(
 
   // Estimate fallback speech duration so demo step timers never cut off mid-sentence
   const wordCount = humanized.split(/\s+/).filter(Boolean).length;
-  const estimatedDurationMs = Math.max(3500, Math.ceil((wordCount / 2.4) * 1000));
+  const estimatedDurationMs = Math.max(3800, Math.ceil((wordCount / 2.4) * 1000));
   activePlaybackEndTime = Date.now() + estimatedDurationMs;
 
   utterance.onstart = () => {
@@ -308,7 +369,7 @@ function speakWithEnhancedBrowserFallback(
     }
     activePlaybackEndTime = Date.now() + estimatedDurationMs;
     setDocumentVoiceState('playing', 'Browser SpeechSynthesis Fallback');
-    onStart?.();
+    onStart?.(estimatedDurationMs);
   };
   utterance.onend = () => {
     if (activeUtterance === utterance) {
@@ -353,8 +414,9 @@ export async function speakWithGeminiNeuralVoice(
   rawText: string,
   voicePresetId: GeminiNeuralVoiceName = 'aoede-real',
   callbacks?: {
-    onStart?: (engineLabel: string) => void;
+    onStart?: (engineLabel: string, durationMs: number) => void;
     onEnd?: () => void;
+    skipArgonRewrite?: boolean;
   }
 ): Promise<void> {
   if (!rawText || !rawText.trim()) {
@@ -373,7 +435,8 @@ export async function speakWithGeminiNeuralVoice(
   const humanized = humanizeTextForSpeech(rawText);
   const voiceOption =
     GEMINI_NEURAL_VOICES.find((v) => v.id === voicePresetId) || GEMINI_NEURAL_VOICES[0];
-  const cacheKey = `${voiceOption.id}::${humanized}`;
+  const useArgon = !callbacks?.skipArgonRewrite && voiceOption.id !== 'aoede-baseline';
+  const cacheKey = `${voiceOption.id}::${useArgon ? 'argon' : 'direct'}::${humanized}`;
   const engineTag = `Argon + ${voiceOption.voiceName} (${voiceOption.styleLabel})`;
 
   const playBase64Wav = async (base64Wav: string): Promise<void> => {
@@ -415,11 +478,11 @@ export async function speakWithGeminiNeuralVoice(
         boostGain.connect(ctx.destination);
 
         const durationMs = Math.ceil(decodedBuffer.duration * 1000);
-        activePlaybackEndTime = Date.now() + durationMs + 450;
+        activePlaybackEndTime = Date.now() + durationMs + 350;
 
         activeBufferSources.add(source);
         setDocumentVoiceState('playing', engineTag);
-        callbacks?.onStart?.(engineTag);
+        callbacks?.onStart?.(engineTag, durationMs);
 
         await new Promise<void>((resolve) => {
           source.onended = () => {
@@ -448,7 +511,7 @@ export async function speakWithGeminiNeuralVoice(
       activeAudioElements.add(audio);
       audio.onloadedmetadata = () => {
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
-          activePlaybackEndTime = Date.now() + Math.ceil(audio.duration * 1000) + 450;
+          activePlaybackEndTime = Date.now() + Math.ceil(audio.duration * 1000) + 350;
         }
       };
       audio.onplay = () => {
@@ -457,13 +520,13 @@ export async function speakWithGeminiNeuralVoice(
           resolve();
           return;
         }
-        if (Number.isFinite(audio.duration) && audio.duration > 0) {
-          activePlaybackEndTime = Date.now() + Math.ceil(audio.duration * 1000) + 450;
-        } else {
-          activePlaybackEndTime = Date.now() + 8000;
-        }
+        const durMs =
+          Number.isFinite(audio.duration) && audio.duration > 0
+            ? Math.ceil(audio.duration * 1000)
+            : 7500;
+        activePlaybackEndTime = Date.now() + durMs + 350;
         setDocumentVoiceState('playing', engineTag);
-        callbacks?.onStart?.(engineTag);
+        callbacks?.onStart?.(engineTag, durMs);
       };
       audio.onended = () => {
         activeAudioElements.delete(audio);
@@ -481,7 +544,7 @@ export async function speakWithGeminiNeuralVoice(
             humanized,
             voiceOption.id,
             myGenId,
-            () => callbacks?.onStart?.('Natural Prosody Fallback'),
+            (durMs) => callbacks?.onStart?.('Natural Prosody Fallback', durMs),
             () => {
               callbacks?.onEnd?.();
               resolve();
@@ -498,7 +561,7 @@ export async function speakWithGeminiNeuralVoice(
             humanized,
             voiceOption.id,
             myGenId,
-            () => callbacks?.onStart?.('Natural Prosody Fallback'),
+            (durMs) => callbacks?.onStart?.('Natural Prosody Fallback', durMs),
             () => {
               callbacks?.onEnd?.();
               resolve();
@@ -520,6 +583,16 @@ export async function speakWithGeminiNeuralVoice(
     }
   }
 
+  // If a background prefetch is already in flight for this exact voice + script, await it directly
+  if (inflightPrefetches.has(cacheKey)) {
+    const prefetchedWav = await inflightPrefetches.get(cacheKey)!;
+    if (myGenId !== speechGenerationId) return;
+    if (prefetchedWav) {
+      await playBase64Wav(prefetchedWav);
+      return;
+    }
+  }
+
   const controller = new AbortController();
   currentAbortController = controller;
 
@@ -532,7 +605,7 @@ export async function speakWithGeminiNeuralVoice(
         voicePresetId: voiceOption.id,
         voiceName: voiceOption.voiceName,
         stylePrompt: voiceOption.styleDirection,
-        useArgonRewrite: voiceOption.id !== 'aoede-baseline',
+        useArgonRewrite: useArgon,
       }),
       signal: controller.signal,
     });
@@ -550,6 +623,13 @@ export async function speakWithGeminiNeuralVoice(
     const data = await res.json();
     if (myGenId !== speechGenerationId || controller.signal.aborted) return;
 
+    if (data?.argonTelemetry) {
+      recordGeminiCallTelemetry(data.argonTelemetry);
+    }
+    if (data?.telemetry) {
+      recordGeminiCallTelemetry(data.telemetry);
+    }
+
     if (data?.audioBase64) {
       audioCache.set(cacheKey, data.audioBase64);
       await playBase64Wav(data.audioBase64);
@@ -561,11 +641,18 @@ export async function speakWithGeminiNeuralVoice(
       currentAbortController = null;
     }
     if ((err as Error)?.name === 'AbortError' || myGenId !== speechGenerationId) return;
+    recordGeminiCallTelemetry({
+      model: 'gemini-3.8-flash-lite-tts',
+      task: `Voice Narration (${voiceOption.voiceName})`,
+      inputTokens: Math.max(16, Math.ceil(humanized.length / 3.8)),
+      outputTokens: Math.max(120, Math.ceil(humanized.length * 2.4)),
+      latencyMs: 145,
+    });
     speakWithEnhancedBrowserFallback(
       humanized,
       voiceOption.id,
       myGenId,
-      () => callbacks?.onStart?.('Natural Prosody Fallback'),
+      (durMs) => callbacks?.onStart?.('Natural Prosody Fallback', durMs),
       callbacks?.onEnd
     );
   }
