@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { FacadeMaterialStyle } from '../data/campusData';
 
+const facadeTextureCache = new Map<string, THREE.CanvasTexture>();
+const satelliteTextureCache = new Map<string, THREE.CanvasTexture>();
+
 /**
  * Generates an authentic architectural facade texture tailored to each London university
  * building style (Neoclassical Portland stone, Victorian red-brick & terracotta,
@@ -12,6 +15,10 @@ export function createWindowFacadeTexture(
   isNight: boolean,
   facadeStyle: FacadeMaterialStyle = 'portland-stone'
 ): THREE.CanvasTexture {
+  const cacheKey = `${accentHex}_${isNight ? 'night' : 'day'}_${facadeStyle}`;
+  const cached = facadeTextureCache.get(cacheKey);
+  if (cached) return cached;
+
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
@@ -105,7 +112,8 @@ export function createWindowFacadeTexture(
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+  facadeTextureCache.set(cacheKey, texture);
   return texture;
 }
 
@@ -289,3 +297,151 @@ export function createGlowingParticleTexture(): THREE.CanvasTexture {
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
+
+export type GroundMapRealismStyle = 'architectural' | 'satellite' | 'hybrid' | 'earth-3d';
+
+/**
+ * Generates a high-resolution aerial Satellite or Hybrid (Satellite + Vector Street/Tube Labels)
+ * ground texture mapped across the 340x340 London 3D terrain plane so real-world objects,
+ * garden squares (Gordon Sq, Tavistock Sq, Russell Sq), arterial streets, and the River Thames
+ * look grounded in satellite earth observation.
+ */
+export function createSatelliteHybridGroundTexture(
+  renderer: THREE.WebGLRenderer,
+  style: GroundMapRealismStyle
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d')!;
+
+  // 1. Deep aerial urban London slate/earth base
+  ctx.fillStyle = '#2d3830';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // 2. Aerial mottled urban block & garden canopy patches
+  for (let i = 0; i < 650; i++) {
+    const x = (i * 173) % 1024;
+    const y = (i * 257) % 1024;
+    const r = 16 + (i % 38);
+    const isPark = i % 3 !== 0;
+    const grad = ctx.createRadialGradient(x, y, 2, x, y, r);
+    if (isPark) {
+      grad.addColorStop(0, 'rgba(54, 92, 56, 0.55)');
+      grad.addColorStop(1, 'rgba(45, 56, 48, 0)');
+    } else {
+      grad.addColorStop(0, 'rgba(72, 78, 84, 0.45)');
+      grad.addColorStop(1, 'rgba(45, 56, 48, 0)');
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 3. Bloomsbury & London Historic Garden Squares (Gordon Sq, Tavistock Sq, Russell Sq, Lincoln's Inn Fields, Hyde Park)
+  const gardenSquares = [
+    { name: 'Gordon Square', x: 520, y: 365, w: 86, h: 86 },
+    { name: 'Tavistock Square', x: 565, y: 295, w: 82, h: 82 },
+    { name: 'Russell Square', x: 585, y: 425, w: 112, h: 112 },
+    { name: "Lincoln's Inn Fields", x: 645, y: 505, w: 108, h: 88 },
+    { name: "Regent's Park", x: 380, y: 240, w: 165, h: 135 },
+    { name: 'Hyde Park & Kensington Gdns', x: 210, y: 555, w: 195, h: 145 },
+  ];
+
+  gardenSquares.forEach((sq) => {
+    ctx.fillStyle = '#2f5e35';
+    ctx.fillRect(sq.x - sq.w / 2, sq.y - sq.h / 2, sq.w, sq.h);
+    ctx.strokeStyle = '#84a98c';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sq.x - sq.w / 2 + 4, sq.y - sq.h / 2 + 4, sq.w - 8, sq.h - 8);
+    // Diagonal gravel garden paths visible in satellite view
+    ctx.strokeStyle = 'rgba(214, 211, 209, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sq.x - sq.w / 2 + 6, sq.y - sq.h / 2 + 6);
+    ctx.lineTo(sq.x + sq.w / 2 - 6, sq.y + sq.h / 2 - 6);
+    ctx.moveTo(sq.x + sq.w / 2 - 6, sq.y - sq.h / 2 + 6);
+    ctx.lineTo(sq.x - sq.w / 2 + 6, sq.y + sq.h / 2 - 6);
+    ctx.stroke();
+  });
+
+  // 4. Arterial London Road Grid (Gower St, Euston Rd, Tottenham Court Rd, Strand, Victoria Embankment, Exhibition Rd)
+  const arterialCorridors = [
+    { x1: 470, y1: 120, x2: 510, y2: 680, width: 12, label: 'Gower St / Bloomsbury' },
+    { x1: 160, y1: 270, x2: 880, y2: 240, width: 15, label: 'Euston Rd (A501)' },
+    { x1: 425, y1: 390, x2: 710, y2: 390, width: 10, label: 'Torrington Pl / Malet Pl' },
+    { x1: 450, y1: 595, x2: 740, y2: 545, width: 13, label: 'The Strand / Aldwych' },
+    { x1: 245, y1: 500, x2: 245, y2: 790, width: 12, label: 'Exhibition Rd (South Ken)' },
+  ];
+
+  arterialCorridors.forEach((rd) => {
+    ctx.strokeStyle = style === 'hybrid' ? '#475569' : '#334155';
+    ctx.lineWidth = rd.width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(rd.x1, rd.y1);
+    ctx.lineTo(rd.x2, rd.y2);
+    ctx.stroke();
+
+    if (style === 'hybrid') {
+      // Google Hybrid yellow/white casing highlight
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(rd.x1, rd.y1);
+      ctx.lineTo(rd.x2, rd.y2);
+      ctx.stroke();
+    }
+  });
+
+  // 5. Hybrid Mode Vector Labels (Streets, Squares & London Underground Station Roundels)
+  if (style === 'hybrid') {
+    ctx.font = 'bold 15px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+
+    gardenSquares.forEach((sq) => {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+      ctx.fillRect(sq.x - 62, sq.y - 10, 124, 20);
+      ctx.fillStyle = '#86efac';
+      ctx.fillText(sq.name, sq.x, sq.y + 5);
+    });
+
+    const tubeStations = [
+      { name: 'Euston Square  Underground', x: 482, y: 288 },
+      { name: 'Russell Square Station', x: 600, y: 405 },
+      { name: 'Holborn / LSE', x: 635, y: 495 },
+      { name: 'Temple / Strand (KCL)', x: 635, y: 585 },
+      { name: 'South Kensington (Imperial)', x: 255, y: 705 },
+      { name: 'Stratford (UCL East)', x: 865, y: 315 },
+    ];
+
+    tubeStations.forEach((st) => {
+      // Iconic red-and-blue Underground roundel + high-contrast Hybrid pill
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.fillRect(st.x - 86, st.y - 12, 172, 24);
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(st.x - 86, st.y - 12, 172, 24);
+
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(st.x - 72, st.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(st.x - 79, st.y - 2, 14, 4);
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 12px Inter, system-ui, sans-serif';
+      ctx.fillText(st.name, st.x + 8, st.y + 4);
+    });
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return texture;
+}
+

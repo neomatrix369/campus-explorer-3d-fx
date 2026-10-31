@@ -7,29 +7,45 @@ import {
   computeTerrainVertexColor,
   DEMO_WALKTHROUGH_STEPS,
   filterStudySpaces,
+  formatWalkthroughSpeechScript,
+  getBuildingAggregateMetrics,
   getTerrainElevation,
   getTopographyInfo,
   getWalkthroughStep,
   parseBlueprintToBuilding,
   reserveStudySeat,
+  SCENIC_3D_VANTAGE_POINTS,
 } from './campusLogic.ts';
 import { buildCampusVectorPdfBytes } from './pdfMapGenerator.ts';
+import {
+  LONDON_RIVERS_AND_STREAMS_3D,
+  LONDON_THAMES_BRIDGES_3D,
+} from './londonOsmGeojson.ts';
+import {
+  getGeminiTelemetrySnapshot,
+  recordGeminiCallTelemetry,
+} from './geminiTelemetryTracker.ts';
 
-test('calculateSunState transitions accurately across solar day, golden hour, and nocturnal neon phases', () => {
+test('calculateSunState transitions accurately across solar day, golden hour, and nocturnal neon phases with tempered non-glaring brightness', () => {
   const midnight = calculateSunState(1.5);
   assert.equal(midnight.isNight, true);
   assert.equal(midnight.phaseLabel, 'Nocturnal Neon Cycle');
-  assert.ok(midnight.windowGlowIntensity > 1.2);
+  assert.ok(midnight.windowGlowIntensity > 0.3 && midnight.windowGlowIntensity <= 0.7);
+  assert.equal(midnight.fogColorHex, '#070b14');
 
   const noon = calculateSunState(13.0);
   assert.equal(noon.isNight, false);
   assert.equal(noon.isGoldenHour, false);
   assert.equal(noon.phaseLabel, 'Solar Daylight Cycle');
+  assert.equal(noon.windowGlowIntensity, 0.0);
   assert.ok(noon.sunPosition[1] > 40);
+  assert.equal(noon.fogColorHex, '#c7d9ec');
+  assert.notEqual(noon.fogColorHex, midnight.fogColorHex);
 
   const dusk = calculateSunState(18.0);
   assert.equal(dusk.isGoldenHour, true);
   assert.equal(dusk.phaseLabel, 'Dusk Golden Hour');
+  assert.equal(dusk.fogColorHex, '#2a1f2d');
 });
 
 test('computeHeatColor maps low noise/vacant to emerald and high noise/crowded to red with semantic labels', () => {
@@ -132,6 +148,52 @@ test('UNIVERSITIES, DEMO_WALKTHROUGH_STEPS, and buildCampusVectorPdfBytes cover 
   assert.equal(wrapped.stepIndex, 0);
   assert.equal(wrapped.universityId, 'ucl-london');
 
+  // Verify every walkthrough step maps to a valid university, campus, building, synchronized narration script, and HUD choreography
+  const combinedNarration = DEMO_WALKTHROUGH_STEPS.map((s) => `${s.title} ${s.narration}`).join(' ');
+  assert.ok(combinedNarration.includes('University College London'));
+  assert.ok(combinedNarration.includes('King’s College London'));
+  assert.ok(combinedNarration.includes('Imperial College London'));
+  assert.ok(combinedNarration.includes('London School of Economics'));
+
+  let sawCollapseAll = false;
+  let sawExpandAll = false;
+  let sawSelectivePanel = false;
+
+  for (let i = 0; i < DEMO_WALKTHROUGH_STEPS.length; i++) {
+    const step = getWalkthroughStep(i);
+    const script = formatWalkthroughSpeechScript(step);
+    assert.ok(script.includes(`Stop ${i + 1} of ${DEMO_WALKTHROUGH_STEPS.length}`));
+    assert.ok(script.includes(step.title));
+    assert.ok(script.includes(step.narration));
+    assert.ok(step.featureBadge.length > 5);
+
+    for (const hud of [step.hudState, step.midStepHudState]) {
+      assert.ok(hud.choreographyLabel.length > 3);
+      if (hud.leftCollapsed && hud.rightCollapsed && hud.dockCollapsed) {
+        sawCollapseAll = true;
+      } else if (!hud.leftCollapsed && !hud.rightCollapsed && !hud.dockCollapsed) {
+        sawExpandAll = true;
+      } else {
+        sawSelectivePanel = true;
+      }
+    }
+
+    const uni = UNIVERSITIES.find((u) => u.id === step.universityId);
+    assert.ok(uni, `Missing university ${step.universityId}`);
+    const camp = uni.campuses.find((c) => c.id === step.campusId);
+    assert.ok(camp, `Missing campus ${step.campusId}`);
+    const bld = camp.buildings.find((b) => b.id === step.buildingId);
+    assert.ok(bld, `Missing building ${step.buildingId}`);
+  }
+
+  assert.equal(sawCollapseAll, true, 'Expected walkthrough choreography to include Collapse All');
+  assert.equal(sawExpandAll, true, 'Expected walkthrough choreography to include Expand All');
+  assert.equal(
+    sawSelectivePanel,
+    true,
+    'Expected walkthrough choreography to include selective individual control collapse/expand'
+  );
+
   const ucl = UNIVERSITIES[0];
   const bloomsbury = ucl.campuses[0];
   const pdfBytes = buildCampusVectorPdfBytes(
@@ -166,4 +228,74 @@ test('UNIVERSITIES, DEMO_WALKTHROUGH_STEPS, and buildCampusVectorPdfBytes cover 
     }
   }
 });
+
+test('LONDON_RIVERS_AND_STREAMS_3D, LONDON_THAMES_BRIDGES_3D, and SCENIC_3D_VANTAGE_POINTS cover the River Thames, 11 tributaries/canals/lost rivers, and 9 3D photo vantage positions', () => {
+  assert.equal(LONDON_RIVERS_AND_STREAMS_3D.length, 12);
+  assert.equal(LONDON_THAMES_BRIDGES_3D.length, 7);
+
+  const thames = LONDON_RIVERS_AND_STREAMS_3D.find((w) => w.id === 'river-thames');
+  assert.ok(thames);
+  assert.equal(thames.type, 'tidal-river');
+  assert.ok(thames.pathXZ.length >= 9);
+  assert.ok(thames.widthSceneUnits >= 12);
+  assert.ok(thames.realLengthKm > 30);
+
+  const expectedWaterwayIds = [
+    'river-thames',
+    'river-lea-waterworks',
+    'regents-canal',
+    'river-westbourne-serpentine',
+    'river-wandle',
+    'river-ravensbourne',
+    'river-fleet',
+    'river-tyburn',
+    'river-walbrook',
+    'counters-creek',
+    'river-effra',
+    'river-neckinger',
+  ];
+  for (const id of expectedWaterwayIds) {
+    const found = LONDON_RIVERS_AND_STREAMS_3D.find((w) => w.id === id);
+    assert.ok(found, `Missing London waterway ${id}`);
+    assert.ok(found.pathXZ.length >= 4);
+    assert.ok(found.flowDirection.includes('→'));
+  }
+
+  assert.equal(SCENIC_3D_VANTAGE_POINTS.length, 9);
+  for (const vp of SCENIC_3D_VANTAGE_POINTS) {
+    assert.equal(vp.targetXZ.length, 2);
+    assert.ok(vp.baseRadius > 10);
+    assert.ok(vp.baseHeight > 10);
+  }
+});
+
+test('getBuildingAggregateMetrics returns finite occupancyPct and occupancyRatio (never NaN) and Gemini Telemetry tracks tokens, latency, and cost', () => {
+  for (const uni of UNIVERSITIES) {
+    for (const camp of uni.campuses) {
+      for (const b of camp.buildings) {
+        const m = getBuildingAggregateMetrics(b);
+        assert.equal(Number.isFinite(m.occupancyPct), true, `occupancyPct NaN on ${b.id}`);
+        assert.equal(Number.isFinite(m.occupancyRatio), true, `occupancyRatio NaN on ${b.id}`);
+        assert.ok(m.occupancyPct >= 0 && m.occupancyPct <= 100);
+      }
+    }
+  }
+
+  recordGeminiCallTelemetry({
+    model: 'gemini-4-argon',
+    task: 'Unit Test Prosody Polish',
+    inputTokens: 120,
+    outputTokens: 60,
+    latencyMs: 245,
+  });
+
+  const snap = getGeminiTelemetrySnapshot();
+  assert.equal(snap.byModel.length, 4);
+  assert.ok(snap.totals.totalInputTokens > 0);
+  assert.ok(snap.totals.totalOutputTokens > 0);
+  assert.ok(snap.totals.avgLatencyMs > 0);
+  assert.ok(snap.totals.totalCostUsd > 0);
+});
+
+
 

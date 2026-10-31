@@ -1,10 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {
   CampusBuilding,
   PathwaySegment,
@@ -13,25 +9,30 @@ import {
 } from '../data/campusData';
 import {
   calculateSunState,
+  Captured3DPhoto,
   computeHeatColor,
   computeTerrainVertexColor,
   getBuildingAggregateMetrics,
   getTerrainElevation,
+  Scenic3DVantagePoint,
 } from '../utils/campusLogic';
 import {
   createFoliageCanopyTexture,
   createGlowingParticleTexture,
   createPlazaGroundTextures,
+  createSatelliteHybridGroundTexture,
   createSoftRadialShadowTexture,
   createWindowFacadeTexture,
+  GroundMapRealismStyle,
 } from '../utils/proceduralTextures';
 import { spatialAudio } from '../utils/spatialAudioEngine';
 import {
   getLondonInterUniversityRoutes,
   LONDON_3D_ICONIC_LANDMARKS,
+  LONDON_RIVERS_AND_STREAMS_3D,
   LONDON_ROYAL_PARKS_3D,
+  LONDON_THAMES_BRIDGES_3D,
   LONDON_UNIVERSITY_GEO_LOCATIONS,
-  RIVER_THAMES_SCENE_XZ_PATH,
 } from '../utils/londonOsmGeojson';
 
 export type CameraViewPreset = 'overview' | 'focus-building' | 'street-level' | 'floor-cutaway';
@@ -53,6 +54,9 @@ interface CampusScene3DProps {
   showUrbanContext: boolean;
   showBloomAndFog: boolean;
   showLondonCityMap?: boolean;
+  showRiversAndStreams?: boolean;
+  focusedRiverId?: string | null;
+  groundMapStyle?: GroundMapRealismStyle;
   terrainPreset: TerrainPreset;
   waterLevelY: number;
   foliageHue: number;
@@ -60,8 +64,18 @@ interface CampusScene3DProps {
   pathways: PathwaySegment[];
   bloomIntensity: number;
   cameraPreset: CameraViewPreset;
+  walkthroughStepIndex?: number;
+  isWalkthroughActive?: boolean;
   onSelectBuilding: (buildingId: string) => void;
   onSelectUniversityFromCityMap?: (universityId: string, campusId: string) => void;
+  onSelectRiver?: (riverId: string) => void;
+  onRegisterPhotoCapture?: (
+    captureFn: (options: {
+      vantage: Scenic3DVantagePoint;
+      count: number;
+      includeLightingCycle: boolean;
+    }) => Captured3DPhoto[]
+  ) => void;
 }
 
 // Pre-allocated math scratch objects outside the render loop (Zero GC)
@@ -174,6 +188,9 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
   showUrbanContext,
   showBloomAndFog,
   showLondonCityMap = false,
+  showRiversAndStreams = true,
+  focusedRiverId = null,
+  groundMapStyle = 'architectural',
   terrainPreset,
   waterLevelY,
   foliageHue,
@@ -181,13 +198,18 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
   pathways,
   bloomIntensity,
   cameraPreset,
+  walkthroughStepIndex = 0,
+  isWalkthroughActive = false,
   onSelectBuilding,
   onSelectUniversityFromCityMap,
+  onSelectRiver,
+  onRegisterPhotoCapture,
 }) => {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
   const pinElementsRef = useRef<Record<string, HTMLButtonElement | null>>({});
   const landmarkPinElementsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const buildingPinElementsRef = useRef<Record<string, HTMLButtonElement | null>>({});
+  const riverPinElementsRef = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const propsRef = useRef({
     buildings,
@@ -206,6 +228,9 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     showUrbanContext,
     showBloomAndFog,
     showLondonCityMap,
+    showRiversAndStreams,
+    focusedRiverId,
+    groundMapStyle,
     terrainPreset,
     waterLevelY,
     foliageHue,
@@ -213,8 +238,12 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     pathways,
     bloomIntensity,
     cameraPreset,
+    walkthroughStepIndex,
+    isWalkthroughActive,
     onSelectBuilding,
     onSelectUniversityFromCityMap,
+    onSelectRiver,
+    onRegisterPhotoCapture,
   });
 
   useEffect(() => {
@@ -235,6 +264,9 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       showUrbanContext,
       showBloomAndFog,
       showLondonCityMap,
+      showRiversAndStreams,
+      focusedRiverId,
+      groundMapStyle,
       terrainPreset,
       waterLevelY,
       foliageHue,
@@ -242,8 +274,12 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       pathways,
       bloomIntensity,
       cameraPreset,
+      walkthroughStepIndex,
+      isWalkthroughActive,
       onSelectBuilding,
       onSelectUniversityFromCityMap,
+      onSelectRiver,
+      onRegisterPhotoCapture,
     };
   }, [
     buildings,
@@ -262,6 +298,9 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     showUrbanContext,
     showBloomAndFog,
     showLondonCityMap,
+    showRiversAndStreams,
+    focusedRiverId,
+    groundMapStyle,
     terrainPreset,
     waterLevelY,
     foliageHue,
@@ -269,16 +308,22 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     pathways,
     bloomIntensity,
     cameraPreset,
+    walkthroughStepIndex,
+    isWalkthroughActive,
     onSelectBuilding,
     onSelectUniversityFromCityMap,
+    onSelectRiver,
+    onRegisterPhotoCapture,
   ]);
 
   const rebuildBuildingsRef = useRef<(() => void) | null>(null);
   const rebuildTerrainRef = useRef<(() => void) | null>(null);
+  const rebuildMacroMapRef = useRef<(() => void) | null>(null);
   const updateCameraTargetRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     rebuildTerrainRef.current?.();
+    rebuildMacroMapRef.current?.();
     rebuildBuildingsRef.current?.();
   }, [
     terrainPreset,
@@ -292,12 +337,24 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     showUrbanContext,
     showBloomAndFog,
     showLondonCityMap,
+    showRiversAndStreams,
+    focusedRiverId,
+    groundMapStyle,
     activeCampusId,
   ]);
 
+  const isNightPhase = calculateSunState(solarHour).isNight;
+
   useEffect(() => {
     rebuildBuildingsRef.current?.();
-  }, [buildings, showHeatmap, selectedBuildingId, selectedFloorNumber, showBloomAndFog]);
+  }, [
+    buildings,
+    showHeatmap,
+    selectedBuildingId,
+    selectedFloorNumber,
+    showBloomAndFog,
+    isNightPhase,
+  ]);
 
   useEffect(() => {
     updateCameraTargetRef.current?.();
@@ -307,7 +364,10 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     cameraPreset,
     terrainPreset,
     showLondonCityMap,
+    focusedRiverId,
     activeCampusId,
+    walkthroughStepIndex,
+    isWalkthroughActive,
   ]);
 
   useEffect(() => {
@@ -332,32 +392,26 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
       powerPreference: 'high-performance',
-      preserveDrawingBuffer: isSoftwareGl,
+      preserveDrawingBuffer: true,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.86;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.toneMappingExposure = 0.82;
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(width, height);
-    renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.enabled = false;
     renderer.domElement.setAttribute('data-testid', 'campus-webgl-canvas');
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0f172a');
-    scene.fog = new THREE.FogExp2('#0f172a', 0.0018);
+    const sceneBgColor = new THREE.Color('#0f172a');
+    scene.background = sceneBgColor;
+    scene.fog = new THREE.FogExp2('#0f172a', 0.0016);
 
-    // 2. Studio Environment Reflection via RoomEnvironment + PMREMGenerator
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.24;
-    pmremGenerator.dispose();
-
-    // 3. Camera & OrbitControls
-    const camera = new THREE.PerspectiveCamera(46, width / height, 0.5, 520);
+    // 3. Camera & OrbitControls (near=1.5 eliminates WebGL depth-buffer Z-fighting flicker)
+    const camera = new THREE.PerspectiveCamera(46, width / height, 1.5, 520);
     camera.position.set(-6, 98, 126);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -379,33 +433,24 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     hemiLight.position.set(0, 75, 0);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight('#fffbeb', 1.85);
+    const sunLight = new THREE.DirectionalLight('#fffbeb', 1.65);
     sunLight.position.set(35, 55, 25);
-    sunLight.castShadow = !isSoftwareGl;
-    sunLight.shadow.mapSize.width = 1024;
-    sunLight.shadow.mapSize.height = 1024;
-    const d = 140;
-    sunLight.shadow.camera.left = -d;
-    sunLight.shadow.camera.right = d;
-    sunLight.shadow.camera.top = d;
-    sunLight.shadow.camera.bottom = -d;
-    sunLight.shadow.camera.near = 2;
-    sunLight.shadow.camera.far = 280;
-    sunLight.shadow.bias = -0.0005;
-    sunLight.shadow.normalBias = 0.02;
+    sunLight.castShadow = false;
     scene.add(sunLight);
 
     const rimLight = new THREE.DirectionalLight('#38bdf8', 0.55);
     rimLight.position.set(-45, 32, -38);
     scene.add(rimLight);
 
-    // 5. Sculpted 3D Real-World Topographic Terrain Mesh + Biome Vertex Coloring
+    // 5. Sculpted 3D Real-World Topographic Terrain Mesh + Biome / Satellite / Hybrid Ground Textures
     const { map: groundMap, bumpMap: groundBump } = createPlazaGroundTextures(renderer);
+    const satelliteGroundMap = createSatelliteHybridGroundTexture(renderer, 'satellite');
+    const hybridGroundMap = createSatelliteHybridGroundTexture(renderer, 'hybrid');
     const { map: foliageMap, bumpMap: foliageBump } = createFoliageCanopyTexture(renderer);
     const shadowTex = createSoftRadialShadowTexture();
     const particleTex = createGlowingParticleTexture();
 
-    const terrainSegments = isSoftwareGl ? 96 : 140;
+    const terrainSegments = 96;
     const terrainGeo = new THREE.PlaneGeometry(340, 340, terrainSegments, terrainSegments);
     terrainGeo.rotateX(-Math.PI / 2);
 
@@ -631,6 +676,19 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       const posAttr = terrainGeo.attributes.position as THREE.BufferAttribute;
       const colAttr = terrainGeo.attributes.color as THREE.BufferAttribute;
       const eps = 1.2;
+
+      const activeMapStyle = propsRef.current.groundMapStyle || 'architectural';
+      if (activeMapStyle === 'hybrid') {
+        terrainMat.map = hybridGroundMap;
+        terrainMat.vertexColors = false;
+      } else if (activeMapStyle === 'satellite' || activeMapStyle === 'earth-3d') {
+        terrainMat.map = satelliteGroundMap;
+        terrainMat.vertexColors = false;
+      } else {
+        terrainMat.map = groundMap;
+        terrainMat.vertexColors = true;
+      }
+      terrainMat.needsUpdate = true;
 
       for (let i = 0; i < posAttr.count; i++) {
         const wx = posAttr.getX(i);
@@ -1008,19 +1066,37 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     scene.add(buildingsRoot);
     const interactableMeshes: THREE.Object3D[] = [];
 
-    let composer: EffectComposer | null = null;
-    let bloomPass: UnrealBloomPass | null = null;
-    if (!isSoftwareGl) {
-      composer = new EffectComposer(renderer);
-      composer.addPass(new RenderPass(scene, camera));
-      bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(width, height),
-        propsRef.current.bloomIntensity,
-        0.45,
-        0.78
-      );
-      composer.addPass(bloomPass);
-    }
+    const sharedShadowMat = new THREE.MeshBasicMaterial({
+      map: shadowTex,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
+    const sharedPlinthMat = new THREE.MeshStandardMaterial({
+      color: '#475569',
+      roughness: 0.84,
+      metalness: 0.1,
+    });
+    const sharedSelectedPlinthMat = new THREE.MeshStandardMaterial({
+      color: '#64748b',
+      roughness: 0.84,
+      metalness: 0.1,
+    });
+    const sharedSolarArrayMat = new THREE.MeshStandardMaterial({
+      color: '#1e3a8a',
+      roughness: 0.22,
+      metalness: 0.78,
+    });
+    const sharedDeskMat = new THREE.MeshStandardMaterial({
+      color: '#a16207',
+      roughness: 0.7,
+    });
+    const sharedPodMat = new THREE.MeshStandardMaterial({
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.42,
+      roughness: 0.15,
+    });
 
     const buildSceneBuildings = () => {
       while (buildingsRoot.children.length > 0) {
@@ -1037,12 +1113,15 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         showBloomAndFog: bloomOn,
         solarHour: currentHour,
         terrainPreset: activePreset,
+        cameraPreset: activeCamPreset,
       } = propsRef.current;
 
       const sunState = calculateSunState(currentHour);
 
       currentBuildings.forEach((b) => {
         const isSelected = b.id === activeId;
+        const isCutawayInspect =
+          isSelected && (activeFloor !== null || activeCamPreset === 'floor-cutaway');
         const bGroup = new THREE.Group();
         const groundY = getTerrainElevation(b.position[0], b.position[2], activePreset);
         bGroup.position.set(b.position[0], groundY, b.position[2]);
@@ -1058,30 +1137,20 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
 
         const shadowPlane = new THREE.Mesh(
           new THREE.PlaneGeometry(w * 1.65, d * 1.65),
-          new THREE.MeshBasicMaterial({
-            map: shadowTex,
-            transparent: true,
-            opacity: 0.65,
-            depthWrite: false,
-          })
+          sharedShadowMat
         );
         shadowPlane.rotation.x = -Math.PI / 2;
-        shadowPlane.position.y = 0.1;
+        shadowPlane.position.y = 0.12;
         bGroup.add(shadowPlane);
 
         const plinthTop = 0.8;
         const foundationDepth = 5.5;
         const totalPlinthH = plinthTop + foundationDepth;
         const plinthMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(w + 1.6, totalPlinthH, d + 1.6),
-          new THREE.MeshStandardMaterial({
-            color: isSelected ? '#64748b' : '#475569',
-            roughness: 0.82,
-            metalness: 0.12,
-          })
+          new THREE.BoxGeometry(w + 1.4, totalPlinthH, d + 1.4),
+          isSelected ? sharedSelectedPlinthMat : sharedPlinthMat
         );
         plinthMesh.position.y = (plinthTop - foundationDepth) / 2;
-        plinthMesh.receiveShadow = true;
         bGroup.add(plinthMesh);
 
         const hullH = h - plinthTop;
@@ -1093,16 +1162,15 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         const hullMat = new THREE.MeshStandardMaterial({
           color: 0xffffff,
           map: facadeTex,
-          roughness: 0.45,
-          metalness: 0.32,
-          emissive: new THREE.Color(b.accentColor),
+          roughness: 0.62,
+          metalness: 0.18,
+          emissive: new THREE.Color(sunState.isNight ? '#fde68a' : b.accentColor),
           emissiveMap: facadeTex,
           emissiveIntensity:
-            (bloomOn ? 1.0 : 0.35) *
-            sunState.windowGlowIntensity *
-            (heatmapOn ? 0.25 : 0.52),
-          transparent: heatmapOn,
-          opacity: heatmapOn ? 0.44 : 1.0,
+            (bloomOn ? 0.45 : 0.2) * sunState.windowGlowIntensity,
+          transparent: isCutawayInspect,
+          opacity: isCutawayInspect ? 0.32 : 1.0,
+          depthWrite: !isCutawayInspect,
         });
 
         const hullMesh = new THREE.Mesh(hullGeo, hullMat);
@@ -1122,57 +1190,48 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
           const isFloorFocused = isSelected && activeFloor === floor.floorNumber;
 
           const slabY = plinthTop + fIdx * floorStep + floorStep * 0.5;
-          const slabH = heatmapOn || isFloorFocused ? floorStep * 0.76 : 0.22;
+          const slabH = isCutawayInspect || isFloorFocused ? floorStep * 0.68 : 0.18;
 
           const slabGeo =
             b.archetype === 'observatory-tower' || b.archetype === 'geodesic-dome'
-              ? new THREE.CylinderGeometry(w * 0.51, w * 0.51, slabH, 24)
-              : new THREE.BoxGeometry(w + 0.35, slabH, d + 0.35);
+              ? new THREE.CylinderGeometry(w * 0.495, w * 0.495, slabH, 24)
+              : new THREE.BoxGeometry(w + 0.12, slabH, d + 0.12);
 
           const slabColor = heatmapOn || isFloorFocused ? floorHeat.hex : b.accentColor;
           const slabMat = new THREE.MeshStandardMaterial({
             color: slabColor,
-            roughness: 0.2,
-            metalness: 0.7,
+            roughness: 0.45,
+            metalness: 0.35,
             emissive: slabColor,
             emissiveIntensity: isFloorFocused
-              ? 1.15
-              : heatmapOn
-                ? 0.65
-                : isSelected
-                  ? 0.45
-                  : 0.18,
-            transparent: true,
-            opacity: isFloorFocused ? 0.88 : heatmapOn ? 0.72 : 0.85,
+              ? 0.48
+              : isCutawayInspect
+                ? 0.28
+                : heatmapOn
+                  ? 0.16
+                  : 0.06,
+            transparent: isCutawayInspect || isFloorFocused,
+            opacity: isFloorFocused ? 0.88 : isCutawayInspect ? 0.72 : 1.0,
+            depthWrite: !(isCutawayInspect || isFloorFocused),
           });
 
           const slabMesh = new THREE.Mesh(slabGeo, slabMat);
           slabMesh.position.y =
-            heatmapOn || isFloorFocused ? slabY : plinthTop + (fIdx + 1) * floorStep;
+            isCutawayInspect || isFloorFocused ? slabY : plinthTop + (fIdx + 1) * floorStep;
           slabMesh.userData = { buildingId: b.id, floorNumber: floor.floorNumber };
           bGroup.add(slabMesh);
           interactableMeshes.push(slabMesh);
 
           // Real-world 3D Interior Entities on each floor (Study Desks, Chairs & Glass Group Pods)
-          if (isSelected || heatmapOn) {
+          if (isSelected) {
             const deskGroup = new THREE.Group();
             deskGroup.position.y = plinthTop + fIdx * floorStep + 0.25;
-            const deskMat = new THREE.MeshStandardMaterial({
-              color: '#a16207',
-              roughness: 0.7,
-            });
-            const podMat = new THREE.MeshStandardMaterial({
-              color: '#38bdf8',
-              transparent: true,
-              opacity: 0.42,
-              roughness: 0.15,
-            });
 
             for (let dx = -w * 0.3; dx <= w * 0.15; dx += w * 0.22) {
               for (let dz = -d * 0.28; dz <= d * 0.28; dz += d * 0.28) {
                 const deskMesh = new THREE.Mesh(
                   new THREE.BoxGeometry(1.4, 0.22, 0.85),
-                  deskMat
+                  sharedDeskMat
                 );
                 deskMesh.position.set(dx, 0.25, dz);
                 deskGroup.add(deskMesh);
@@ -1180,7 +1239,7 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
             }
             const podMesh = new THREE.Mesh(
               new THREE.BoxGeometry(w * 0.22, floorStep * 0.65, d * 0.38),
-              podMat
+              sharedPodMat
             );
             podMesh.position.set(w * 0.28, floorStep * 0.32, 0);
             deskGroup.add(podMesh);
@@ -1424,6 +1483,17 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
           bGroup.add(lantern);
         }
 
+        // Satellite-Derived Real-World Rooftop Details (Solar PV Arrays)
+        for (let pv = -1; pv <= 1; pv += 2) {
+          const pvPanel = new THREE.Mesh(
+            new THREE.BoxGeometry(w * 0.28, 0.14, d * 0.18),
+            sharedSolarArrayMat
+          );
+          pvPanel.position.set(pv * (w * 0.24), roofY + 0.62, -d * 0.22);
+          pvPanel.rotation.x = 0.18;
+          bGroup.add(pvPanel);
+        }
+
         const beaconColor = heatmapOn ? metrics.heat.hex : b.accentColor;
         const beaconMesh = new THREE.Mesh(
           new THREE.OctahedronGeometry(isSelected ? 1.05 : 0.72, 0),
@@ -1443,11 +1513,26 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         buildingsRoot.add(bGroup);
       });
 
-      if (isSoftwareGl || !composer) {
-        renderer.render(scene, camera);
-      } else {
-        composer.render();
+      // Synchronize solar lighting & sky background before immediate render so Day/Dusk/Night transitions never flash
+      sunLight.position.set(...sunState.sunPosition);
+      sunLight.intensity = sunState.sunIntensity;
+      sunLight.color.set(sunState.sunColorHex);
+      hemiLight.color.set(sunState.hemiSkyHex);
+      hemiLight.groundColor.set(sunState.hemiGroundHex);
+      hemiLight.intensity = sunState.hemiIntensity;
+      renderer.toneMappingExposure = sunState.isNight
+        ? 0.68
+        : sunState.isGoldenHour
+          ? 0.76
+          : 0.82;
+      sceneBgColor.set(sunState.fogColorHex);
+      scene.background = sceneBgColor;
+      if (scene.fog instanceof THREE.FogExp2) {
+        scene.fog.color.copy(sceneBgColor);
+        scene.fog.density = propsRef.current.showBloomAndFog ? sunState.fogDensity : 0.0004;
       }
+
+      renderer.render(scene, camera);
     };
 
     rebuildTerrainRef.current = rebuildTerrainAndEnvironment;
@@ -1524,9 +1609,44 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     }
     scene.add(radarGroup);
 
-    // 10B. City of London 3D Macro Map Group (River Thames, 5 Bridges, Inter-University Arterial Corridors & Campus Boundary Rings)
+    // 10B. City of London 3D Macro Map Group (River Thames, 7 Bridges, All 12 London Rivers/Canals/Lost Rivers, Inter-University Corridors & Campus Boundary Rings)
     const londonCityMacroGroup = new THREE.Group();
+    const londonRiversGroup = new THREE.Group();
+    scene.add(londonRiversGroup);
     const cityMapInteractables: THREE.Object3D[] = [];
+
+    // Dedicated 3D Hydrology Flow Current Particle System (shows live directional flow along River Thames & all London rivers/streams)
+    const riverParticleCount = 320;
+    const riverParticlePositions = new Float32Array(riverParticleCount * 3);
+    const riverParticleColors = new Float32Array(riverParticleCount * 3);
+    const riverParticleGeo = new THREE.BufferGeometry();
+    riverParticleGeo.setAttribute(
+      'position',
+      new THREE.BufferAttribute(riverParticlePositions, 3)
+    );
+    riverParticleGeo.setAttribute(
+      'color',
+      new THREE.BufferAttribute(riverParticleColors, 3)
+    );
+    for (let i = 0; i < riverParticleCount; i++) {
+      const waterway =
+        LONDON_RIVERS_AND_STREAMS_3D[i % LONDON_RIVERS_AND_STREAMS_3D.length];
+      _tempColor.set(waterway.id === 'river-thames' ? '#38bdf8' : waterway.colorHex);
+      riverParticleColors[i * 3] = _tempColor.r;
+      riverParticleColors[i * 3 + 1] = _tempColor.g;
+      riverParticleColors[i * 3 + 2] = _tempColor.b;
+    }
+    const riverParticleMat = new THREE.PointsMaterial({
+      size: 1.55,
+      map: particleTex,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const riverFlowPoints = new THREE.Points(riverParticleGeo, riverParticleMat);
+    scene.add(riverFlowPoints);
 
     const buildLondonCityMacroMap = () => {
       while (londonCityMacroGroup.children.length > 0) {
@@ -1534,67 +1654,224 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         c.geometry?.dispose();
         londonCityMacroGroup.remove(c);
       }
+      while (londonRiversGroup.children.length > 0) {
+        const c = londonRiversGroup.children[0] as THREE.Mesh;
+        c.geometry?.dispose();
+        londonRiversGroup.remove(c);
+      }
       cityMapInteractables.length = 0;
 
       const activePreset = propsRef.current.terrainPreset;
       const activeWaterY = propsRef.current.waterLevelY;
+      const activeFocusedRiver = propsRef.current.focusedRiverId;
 
-      // A. Winding 3D River Thames through Central London (separating North Bank KCL Strand/LSE/UCL from South Bank Waterloo/Guy's)
-      const thamesPts = RIVER_THAMES_SCENE_XZ_PATH.map(([tx, tz]) => {
-        const groundY = Math.max(activeWaterY + 0.25, getTerrainElevation(tx, tz, activePreset));
-        return new THREE.Vector3(tx, groundY + 0.12, tz);
-      });
-      const thamesCurve = new THREE.CatmullRomCurve3(thamesPts);
+      // A. All 12 London Waterways: River Thames, Surface Rivers (Lea, Westbourne/Serpentine, Wandle, Ravensbourne), Regent's Canal & Subterranean Lost Rivers (Fleet, Tyburn, Walbrook, Counter's Creek, Effra, Neckinger)
+      LONDON_RIVERS_AND_STREAMS_3D.forEach((waterway, wIdx) => {
+        const isFocused = activeFocusedRiver === waterway.id;
+        const isThames = waterway.id === 'river-thames';
+        const isSubterranean = waterway.type === 'subterranean-stream';
 
-      // Embankment stone walls along the Thames
-      const embankmentGeo = createTerrainRibbonGeometry(
-        thamesCurve,
-        72,
-        15.8,
-        0.22,
-        activePreset,
-        activeWaterY
-      );
-      const embankmentMesh = new THREE.Mesh(embankmentGeo, sidewalkMat);
-      londonCityMacroGroup.add(embankmentMesh);
+        const curvePts = waterway.pathXZ.map(([wx, wz]) => {
+          const groundY = Math.max(
+            activeWaterY + 0.25,
+            getTerrainElevation(wx, wz, activePreset)
+          );
+          return new THREE.Vector3(wx, groundY + 0.12 + wIdx * 0.005, wz);
+        });
+        const riverCurve = new THREE.CatmullRomCurve3(curvePts);
 
-      // Reflective sapphire River Thames surface
-      const thamesWaterGeo = createTerrainRibbonGeometry(
-        thamesCurve,
-        72,
-        12.4,
-        0.34,
-        activePreset,
-        activeWaterY
-      );
-      const thamesWaterMat = new THREE.MeshStandardMaterial({
-        color: '#0284c7',
-        roughness: 0.12,
-        metalness: 0.85,
-        emissive: '#0369a1',
-        emissiveIntensity: 0.28,
-        side: THREE.DoubleSide,
-      });
-      const thamesWaterMesh = new THREE.Mesh(thamesWaterGeo, thamesWaterMat);
-      londonCityMacroGroup.add(thamesWaterMesh);
+        if (isThames) {
+          // 1. Wide Victoria / South Bank Stone Embankment Walls along the River Thames
+          const embankmentGeo = createTerrainRibbonGeometry(
+            riverCurve,
+            84,
+            waterway.widthSceneUnits + 3.4,
+            0.22,
+            activePreset,
+            activeWaterY
+          );
+          const embankmentMesh = new THREE.Mesh(embankmentGeo, sidewalkMat);
+          londonRiversGroup.add(embankmentMesh);
 
-      // 5 Iconic London Bridges across the Thames (Chelsea, Vauxhall, Westminster, Waterloo, London Bridge)
-      const bridgeFractions = [0.22, 0.38, 0.52, 0.64, 0.78];
-      bridgeFractions.forEach((frac) => {
-        const pt = thamesCurve.getPoint(frac);
-        const tangent = thamesCurve.getTangent(frac);
-        const angleY = Math.atan2(tangent.x, tangent.z);
-        const bridgeH = Math.max(
-          activeWaterY + 0.5,
-          getTerrainElevation(pt.x, pt.z, activePreset)
-        );
-        const bridgeDeck = new THREE.Mesh(
-          new THREE.BoxGeometry(18.5, 0.8, 3.2),
-          walkwayStoneMat
-        );
-        bridgeDeck.position.set(pt.x, bridgeH + 0.95, pt.z);
-        bridgeDeck.rotation.y = angleY;
-        londonCityMacroGroup.add(bridgeDeck);
+          // 2. Reflective Sapphire River Thames Main Channel
+          const thamesWaterGeo = createTerrainRibbonGeometry(
+            riverCurve,
+            84,
+            waterway.widthSceneUnits,
+            0.35,
+            activePreset,
+            activeWaterY
+          );
+          const thamesWaterMat = new THREE.MeshStandardMaterial({
+            color: isFocused ? '#38bdf8' : waterway.colorHex,
+            roughness: 0.1,
+            metalness: 0.86,
+            emissive: isFocused ? '#0ea5e9' : waterway.emissiveHex,
+            emissiveIntensity: isFocused ? 0.65 : 0.34,
+            side: THREE.DoubleSide,
+          });
+          const thamesWaterMesh = new THREE.Mesh(thamesWaterGeo, thamesWaterMat);
+          thamesWaterMesh.userData = { riverId: waterway.id };
+          londonRiversGroup.add(thamesWaterMesh);
+          cityMapInteractables.push(thamesWaterMesh);
+
+          // 3. Directional Flow Chevron Markers along the River Thames (showing West -> East tidal flow)
+          for (let f = 0.08; f <= 0.92; f += 0.1) {
+            const pt = riverCurve.getPoint(f);
+            const tangent = riverCurve.getTangent(f);
+            const angleY = Math.atan2(tangent.x, tangent.z);
+            const wy = Math.max(
+              activeWaterY + 0.48,
+              getTerrainElevation(pt.x, pt.z, activePreset) + 0.42
+            );
+            const arrowCone = new THREE.Mesh(
+              new THREE.ConeGeometry(1.15, 2.8, 4),
+              new THREE.MeshBasicMaterial({
+                color: '#7dd3fc',
+                transparent: true,
+                opacity: 0.78,
+              })
+            );
+            arrowCone.position.set(pt.x, wy, pt.z);
+            arrowCone.rotation.x = Math.PI / 2;
+            arrowCone.rotation.z = -angleY;
+            londonRiversGroup.add(arrowCone);
+          }
+
+          // 4. 7 Iconic London Bridges across the River Thames (Chelsea, Vauxhall, Westminster, Waterloo, Blackfriars, London Bridge, Tower Bridge)
+          LONDON_THAMES_BRIDGES_3D.forEach((bridge) => {
+            const pt = riverCurve.getPoint(bridge.curveFraction);
+            const tangent = riverCurve.getTangent(bridge.curveFraction);
+            const angleY = Math.atan2(tangent.x, tangent.z);
+            const bridgeH = Math.max(
+              activeWaterY + 0.5,
+              getTerrainElevation(pt.x, pt.z, activePreset)
+            );
+            const bridgeDeck = new THREE.Mesh(
+              new THREE.BoxGeometry(19.2, 0.85, 3.4),
+              walkwayStoneMat
+            );
+            bridgeDeck.position.set(pt.x, bridgeH + 0.98, pt.z);
+            bridgeDeck.rotation.y = angleY;
+            londonRiversGroup.add(bridgeDeck);
+
+            if (bridge.id === 'tower-bridge') {
+              // Iconic Twin Gothic Bascule Towers on Tower Bridge
+              [-4.2, 4.2].forEach((offsetAcross) => {
+                const towerMesh = new THREE.Mesh(
+                  new THREE.BoxGeometry(1.6, 5.4, 1.8),
+                  walkwayStoneMat
+                );
+                towerMesh.position.set(
+                  pt.x + Math.cos(angleY) * offsetAcross,
+                  bridgeH + 3.4,
+                  pt.z - Math.sin(angleY) * offsetAcross
+                );
+                towerMesh.rotation.y = angleY;
+                londonRiversGroup.add(towerMesh);
+              });
+            }
+          });
+        } else if (isSubterranean) {
+          // Subterranean "Lost Rivers of London" (River Fleet, Tyburn, Walbrook, Counter's Creek, Effra, Neckinger)
+          // Rendered as glowing translucent aqua culvert ribbons + dashed surface hydrological trace markers
+          const subGeo = createTerrainRibbonGeometry(
+            riverCurve,
+            48,
+            waterway.widthSceneUnits * (isFocused ? 1.35 : 1.0),
+            0.29 + wIdx * 0.004,
+            activePreset,
+            activeWaterY
+          );
+          const subMat = new THREE.MeshStandardMaterial({
+            color: waterway.colorHex,
+            roughness: 0.18,
+            metalness: 0.78,
+            emissive: waterway.emissiveHex,
+            emissiveIntensity: isFocused ? 0.95 : 0.52,
+            transparent: true,
+            opacity: isFocused ? 0.92 : 0.68,
+            side: THREE.DoubleSide,
+          });
+          const subMesh = new THREE.Mesh(subGeo, subMat);
+          subMesh.userData = { riverId: waterway.id };
+          londonRiversGroup.add(subMesh);
+          cityMapInteractables.push(subMesh);
+
+          // Glowing culvert inspection/flow nodes along the underground stream path
+          const nodeCount = 12;
+          for (let n = 1; n < nodeCount; n++) {
+            const pt = riverCurve.getPoint(n / nodeCount);
+            const ny = Math.max(
+              activeWaterY + 0.45,
+              getTerrainElevation(pt.x, pt.z, activePreset) + 0.38
+            );
+            const nodeRing = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.55, 0.55, 0.18, 12),
+              new THREE.MeshBasicMaterial({
+                color: waterway.colorHex,
+                transparent: true,
+                opacity: 0.85,
+              })
+            );
+            nodeRing.position.set(pt.x, ny, pt.z);
+            londonRiversGroup.add(nodeRing);
+          }
+        } else {
+          // Surface Rivers & Canals (River Lea & Waterworks at UCL East, Regent's Canal, River Westbourne & Serpentine, Wandle, Ravensbourne)
+          const bankGeo = createTerrainRibbonGeometry(
+            riverCurve,
+            56,
+            waterway.widthSceneUnits + 1.5,
+            0.2 + wIdx * 0.004,
+            activePreset,
+            activeWaterY
+          );
+          const bankMesh = new THREE.Mesh(bankGeo, sidewalkMat);
+          londonRiversGroup.add(bankMesh);
+
+          const surfaceRiverGeo = createTerrainRibbonGeometry(
+            riverCurve,
+            56,
+            waterway.widthSceneUnits * (isFocused ? 1.3 : 1.0),
+            0.31 + wIdx * 0.004,
+            activePreset,
+            activeWaterY
+          );
+          const surfaceRiverMat = new THREE.MeshStandardMaterial({
+            color: waterway.colorHex,
+            roughness: 0.12,
+            metalness: 0.84,
+            emissive: waterway.emissiveHex,
+            emissiveIntensity: isFocused ? 0.85 : 0.38,
+            side: THREE.DoubleSide,
+          });
+          const surfaceRiverMesh = new THREE.Mesh(surfaceRiverGeo, surfaceRiverMat);
+          surfaceRiverMesh.userData = { riverId: waterway.id };
+          londonRiversGroup.add(surfaceRiverMesh);
+          cityMapInteractables.push(surfaceRiverMesh);
+        }
+
+        // Highlight beacon ring at focused waterway's label position
+        if (isFocused) {
+          const [lx, lz] = waterway.labelXZ;
+          const ly = Math.max(
+            activeWaterY + 0.5,
+            getTerrainElevation(lx, lz, activePreset) + 0.48
+          );
+          const focusRing = new THREE.Mesh(
+            new THREE.RingGeometry(4.2, 5.4, 36),
+            new THREE.MeshBasicMaterial({
+              color: waterway.colorHex,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity: 0.9,
+            })
+          );
+          focusRing.rotation.x = -Math.PI / 2;
+          focusRing.position.set(lx, ly, lz);
+          londonRiversGroup.add(focusRing);
+        }
       });
 
       // B. Geodesic Inter-University Distance Corridors & Glowing Sky Arcs across London
@@ -1632,21 +1909,24 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         const groundRoadMesh = new THREE.Mesh(groundRoadGeo, asphaltMat);
         londonCityMacroGroup.add(groundRoadMesh);
 
-        // Elevated glowing geodesic distance arc
-        const arcPeakY = Math.max(y1, y2) + 9.5 + route.distanceKm * 1.4;
-        const skyArcCurve = new THREE.CatmullRomCurve3([
-          new THREE.Vector3(x1, y1 + 4.5, z1),
-          new THREE.Vector3(midX, arcPeakY, midZ),
-          new THREE.Vector3(x2, y2 + 4.5, z2),
-        ]);
-        const skyArcGeo = new THREE.TubeGeometry(skyArcCurve, 36, 0.26, 8, false);
-        const skyArcMat = new THREE.MeshBasicMaterial({
-          color: g1.accentColor,
-          transparent: true,
-          opacity: 0.72,
-        });
-        const skyArcMesh = new THREE.Mesh(skyArcGeo, skyArcMat);
-        londonCityMacroGroup.add(skyArcMesh);
+        // Elevated glowing geodesic distance arc (Only visible in Macro London 3D City Map mode so it never slices through close-up campus buildings)
+        if (propsRef.current.showLondonCityMap) {
+          const arcPeakY = Math.max(y1, y2) + 14.5 + route.distanceKm * 1.6;
+          const skyArcCurve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(x1, y1 + 8.5, z1),
+            new THREE.Vector3(midX, arcPeakY, midZ),
+            new THREE.Vector3(x2, y2 + 8.5, z2),
+          ]);
+          const skyArcGeo = new THREE.TubeGeometry(skyArcCurve, 36, 0.22, 8, false);
+          const skyArcMat = new THREE.MeshBasicMaterial({
+            color: g1.accentColor,
+            transparent: true,
+            opacity: 0.55,
+            depthWrite: false,
+          });
+          const skyArcMesh = new THREE.Mesh(skyArcGeo, skyArcMat);
+          londonCityMacroGroup.add(skyArcMesh);
+        }
       });
 
       // C. Campus Boundary Rings & OSM Extruded Context Pads at all 7 London Campus Locations
@@ -1660,14 +1940,15 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         const uniHubGroup = new THREE.Group();
         uniHubGroup.position.set(hubX, hubGroundY, hubZ);
 
-        // Glowing University Campus Boundary Ring
+        // Subtle University Campus Boundary Ring
         const ringHalo = new THREE.Mesh(
-          new THREE.RingGeometry(24.5, 26.2, 48),
+          new THREE.RingGeometry(24.5, 25.8, 48),
           new THREE.MeshBasicMaterial({
             color: geo.accentColor,
             side: THREE.DoubleSide,
             transparent: true,
-            opacity: 0.78,
+            opacity: 0.48,
+            depthWrite: false,
           })
         );
         ringHalo.rotation.x = -Math.PI / 2;
@@ -1676,38 +1957,26 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         uniHubGroup.add(ringHalo);
         cityMapInteractables.push(ringHalo);
 
-        // Tall Landmark Beacon Spire for each Campus on the London Map
-        const beaconPillar = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.28, 0.28, 22, 12),
-          new THREE.MeshBasicMaterial({
-            color: geo.accentColor,
-            transparent: true,
-            opacity: 0.52,
-          })
-        );
-        beaconPillar.position.y = 11.5;
-        beaconPillar.userData = { universityId: geo.universityId, campusId: geo.campusId };
-        uniHubGroup.add(beaconPillar);
-        cityMapInteractables.push(beaconPillar);
-
-        const beaconDiamond = new THREE.Mesh(
-          new THREE.OctahedronGeometry(1.55, 0),
-          new THREE.MeshStandardMaterial({
-            color: '#ffffff',
-            emissive: geo.accentColor,
-            emissiveIntensity: 1.5,
-            roughness: 0.1,
-            metalness: 0.9,
-          })
-        );
-        beaconDiamond.position.y = 23.5;
-        beaconDiamond.userData = {
-          universityId: geo.universityId,
-          campusId: geo.campusId,
-          isBeacon: true,
-        };
-        uniHubGroup.add(beaconDiamond);
-        cityMapInteractables.push(beaconDiamond);
+        if (propsRef.current.showLondonCityMap) {
+          const beaconDiamond = new THREE.Mesh(
+            new THREE.OctahedronGeometry(1.35, 0),
+            new THREE.MeshStandardMaterial({
+              color: '#ffffff',
+              emissive: geo.accentColor,
+              emissiveIntensity: 0.55,
+              roughness: 0.2,
+              metalness: 0.8,
+            })
+          );
+          beaconDiamond.position.y = 22.5;
+          beaconDiamond.userData = {
+            universityId: geo.universityId,
+            campusId: geo.campusId,
+            isBeacon: true,
+          };
+          uniHubGroup.add(beaconDiamond);
+          cityMapInteractables.push(beaconDiamond);
+        }
 
         londonCityMacroGroup.add(uniHubGroup);
       });
@@ -1977,10 +2246,11 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       }
     };
 
+    rebuildMacroMapRef.current = buildLondonCityMacroMap;
     buildLondonCityMacroMap();
     scene.add(londonCityMacroGroup);
 
-    // 11. Camera Target Transition Calculation (Supports Full London 3D Map & Individual Campus Geographic Locations)
+    // 11. Camera Target Transition Calculation (Supports Full London 3D Map, Focused London River/Stream & Individual Campus Geographic Locations)
     const updateCameraTarget = () => {
       const {
         buildings: currentBuildings,
@@ -1990,7 +2260,34 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         cameraPreset: preset,
         terrainPreset: activeTerrain,
         showLondonCityMap: cityMapOn,
+        focusedRiverId: activeRiverId,
       } = propsRef.current;
+
+      if (activeRiverId) {
+        const targetRiver = LONDON_RIVERS_AND_STREAMS_3D.find(
+          (r) => r.id === activeRiverId
+        );
+        if (targetRiver) {
+          const [rx, rz] = targetRiver.labelXZ;
+          const ry = getTerrainElevation(rx, rz, activeTerrain);
+          if (targetRiver.id === 'river-thames') {
+            _targetCameraPos.set(22, 108, 128);
+            _targetLookAt.set(28, ry + 2, 42);
+          } else {
+            _targetCameraPos.set(rx - 14, ry + 54, rz + 58);
+            _targetLookAt.set(rx, ry + 2, rz);
+          }
+          if (isSoftwareGl) {
+            camera.position.copy(_targetCameraPos);
+            controls.target.copy(_targetLookAt);
+            controls.update();
+            cameraTransitionActive = false;
+          } else {
+            cameraTransitionActive = true;
+          }
+          return;
+        }
+      }
 
       if (cityMapOn) {
         // High panoramic AccuCities 2025 / Apple Maps 3D London view framing all 7 campuses & 8 London Landmarks in center
@@ -2045,10 +2342,6 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
     updateCameraTargetRef.current = updateCameraTarget;
     updateCameraTarget();
 
-    if (!isSoftwareGl && composer) {
-      renderer.compile(scene, camera);
-    }
-
     const raycaster = new THREE.Raycaster();
     let pointerDownPos = { x: 0, y: 0 };
 
@@ -2078,7 +2371,11 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
 
       const cityHits = raycaster.intersectObjects(cityMapInteractables, false);
       if (cityHits.length > 0) {
-        const { universityId, campusId } = cityHits[0].object.userData || {};
+        const { universityId, campusId, riverId } = cityHits[0].object.userData || {};
+        if (riverId) {
+          propsRef.current.onSelectRiver?.(riverId);
+          return;
+        }
         if (universityId && campusId) {
           propsRef.current.onSelectUniversityFromCityMap?.(universityId, campusId);
         }
@@ -2106,12 +2403,7 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       camera.aspect = newW / newH;
       camera.updateProjectionMatrix();
       renderer.setSize(newW, newH);
-      composer?.setSize(newW, newH);
-      if (isSoftwareGl || !composer) {
-        renderer.render(scene, camera);
-      } else {
-        composer.render();
-      }
+      renderer.render(scene, camera);
     };
     window.addEventListener('resize', handleResize);
 
@@ -2151,20 +2443,81 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
       hemiLight.groundColor.set(sunState.hemiGroundHex);
       hemiLight.intensity = sunState.hemiIntensity;
 
-      _tempColor.set(sunState.fogColorHex);
-      scene.background = _tempColor;
+      // Tempered Day / Golden Hour / Night toneMapping exposure, environment reflection, streetlamps & water color
+      renderer.toneMappingExposure = sunState.isNight
+        ? 0.68
+        : sunState.isGoldenHour
+          ? 0.76
+          : 0.82;
+      scene.environmentIntensity = sunState.isNight
+        ? 0.14
+        : sunState.isGoldenHour
+          ? 0.22
+          : 0.28;
+      lampBulbMat.emissiveIntensity = sunState.isNight
+        ? 1.15
+        : sunState.isGoldenHour
+          ? 0.55
+          : 0.02;
+      waterMat.color.set(
+        sunState.isNight ? '#082f49' : sunState.isGoldenHour ? '#0369a1' : '#0284c7'
+      );
+
+      // Update building facade window glow intensity in real time with tempered, non-glaring brightness
+      buildingsRoot.children.forEach((bGroup) => {
+        const hullMesh = bGroup.children[2] as THREE.Mesh | undefined;
+        if (hullMesh && hullMesh.material instanceof THREE.MeshStandardMaterial) {
+          hullMesh.material.emissiveIntensity =
+            (currentProps.showBloomAndFog ? currentProps.bloomIntensity * 0.45 : 0.18) *
+            sunState.windowGlowIntensity;
+        }
+      });
+
+      sceneBgColor.set(sunState.fogColorHex);
+      scene.background = sceneBgColor;
       if (scene.fog instanceof THREE.FogExp2) {
-        scene.fog.color.copy(_tempColor);
+        scene.fog.color.copy(sceneBgColor);
         scene.fog.density = currentProps.showBloomAndFog ? sunState.fogDensity : 0.0004;
       }
 
-      // Keep River Thames, Bridges, and all 7 London Campuses simultaneously visible on the unified 3D Map of London
+      // Keep River Thames, Bridges, all 12 London Rivers/Streams, and all 7 London Campuses visible on the unified 3D Map of London
       londonCityMacroGroup.visible = true;
+      londonRiversGroup.visible = currentProps.showRiversAndStreams ?? true;
+      riverFlowPoints.visible = currentProps.showRiversAndStreams ?? true;
       buildingsRoot.visible = true;
       plazaGroup.visible = true;
       roadAndPathwayGroup.visible = currentProps.showRoadsAndPaths;
       foliageGroup.visible = currentProps.showFoliage;
       contextBlockInst.visible = currentProps.showUrbanContext;
+
+      // Animate Directional River & Stream Flow Current Particles along the River Thames and all 11 London Tributaries/Canals/Lost Rivers
+      if (londonRiversGroup.visible) {
+        const rPos = riverParticleGeo.attributes.position as THREE.BufferAttribute;
+        const waterwayCount = LONDON_RIVERS_AND_STREAMS_3D.length;
+        for (let i = 0; i < riverParticleCount; i++) {
+          const waterway = LONDON_RIVERS_AND_STREAMS_3D[i % waterwayCount];
+          const pts = waterway.pathXZ;
+          const speed = waterway.id === 'river-thames' ? 0.11 : 0.16;
+          const t = (elapsed * speed + (i / riverParticleCount) * 4.3) % 1;
+          const segCount = pts.length - 1;
+          const segFloat = t * segCount;
+          const segIdx = Math.min(segCount - 1, Math.floor(segFloat));
+          const segT = segFloat - segIdx;
+
+          const p0 = pts[segIdx];
+          const p1 = pts[segIdx + 1];
+          const spread = waterway.widthSceneUnits * 0.28;
+          const lateralOffset = Math.sin(i * 1.7 + elapsed * 1.5) * spread;
+          const px = p0[0] + (p1[0] - p0[0]) * segT + lateralOffset * 0.35;
+          const pz = p0[1] + (p1[1] - p0[1]) * segT + lateralOffset * 0.65;
+          const groundH = Math.max(
+            currentProps.waterLevelY + 0.42,
+            getTerrainElevation(px, pz, currentProps.terrainPreset)
+          );
+          rPos.setXYZ(i, px, groundH + 0.62, pz);
+        }
+        rPos.needsUpdate = true;
+      }
 
       const panSpeed = 26 * delta;
       let manualMove = false;
@@ -2230,14 +2583,23 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
           delta
         );
 
-        if (camera.position.distanceToSquared(_targetCameraPos) < 0.15) {
+        if (camera.position.distanceToSquared(_targetCameraPos) < 0.25) {
           cameraTransitionActive = false;
         }
+      } else if (currentProps.isWalkthroughActive && !isSoftwareGl && !manualMove) {
+        // Gentle synchronized cinematic orbit around active tour stop while voice narration speaks
+        const dx = camera.position.x - controls.target.x;
+        const dz = camera.position.z - controls.target.z;
+        const angle = 0.08 * delta;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        camera.position.x = controls.target.x + dx * cosA - dz * sinA;
+        camera.position.z = controls.target.z + dx * sinA + dz * cosA;
       }
 
       controls.update();
 
-      // Update 3D-to-2D Projected Campus Pins & Iconic London 3D Landmarks across the 3D Map of London
+      // Update 3D-to-2D Projected Campus Pins, London Rivers & Streams Pins, and Iconic London 3D Landmarks
       const viewW = renderer.domElement.clientWidth || window.innerWidth;
       const viewH = renderer.domElement.clientHeight || window.innerHeight;
       for (const geo of LONDON_UNIVERSITY_GEO_LOCATIONS) {
@@ -2267,6 +2629,45 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
           pinEl.style.opacity = '1';
           pinEl.style.pointerEvents = 'auto';
           pinEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0) translate(-50%, -100%)`;
+        }
+      }
+
+      // Project 3D Floating Badges for River Thames & All London Rivers, Canals, and Subterranean Lost Rivers
+      for (const waterway of LONDON_RIVERS_AND_STREAMS_3D) {
+        const rEl = riverPinElementsRef.current[waterway.id];
+        if (!rEl) continue;
+        if (!(currentProps.showRiversAndStreams ?? true)) {
+          rEl.style.opacity = '0';
+          rEl.style.pointerEvents = 'none';
+          continue;
+        }
+        const [rx, rz] = waterway.labelXZ;
+        const ry =
+          Math.max(
+            currentProps.waterLevelY + 0.5,
+            getTerrainElevation(rx, rz, currentProps.terrainPreset)
+          ) + (waterway.id === 'river-thames' ? 6.5 : 4.2);
+        _dummyPos.set(rx, ry, rz);
+        _dummyPos.project(camera);
+
+        if (
+          _dummyPos.z > 1.0 ||
+          _dummyPos.x < -1.05 ||
+          _dummyPos.x > 1.05 ||
+          _dummyPos.y < -1.05 ||
+          _dummyPos.y > 1.05
+        ) {
+          rEl.style.opacity = '0';
+          rEl.style.pointerEvents = 'none';
+        } else {
+          const sx = (_dummyPos.x * 0.5 + 0.5) * viewW;
+          const sy = (-_dummyPos.y * 0.5 + 0.5) * viewH;
+          rEl.style.opacity =
+            currentProps.focusedRiverId === waterway.id || waterway.id === 'river-thames'
+              ? '1'
+              : '0.92';
+          rEl.style.pointerEvents = 'auto';
+          rEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0) translate(-50%, -100%)`;
         }
       }
 
@@ -2417,17 +2818,7 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         }
       });
 
-      if (bloomPass) {
-        bloomPass.strength = currentProps.showBloomAndFog
-          ? currentProps.bloomIntensity
-          : 0.0;
-      }
-
-      if (isSoftwareGl || !composer) {
-        renderer.render(scene, camera);
-      } else {
-        composer.render();
-      }
+      renderer.render(scene, camera);
 
       if (isSoftwareGl) {
         afterDraw(tick);
@@ -2435,6 +2826,248 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         frameId = requestAnimationFrame(tick);
       }
     }
+
+    // Register Multi-Angle 3D Photo Studio Burst Capture (Captures 3 to 5 high-res 3D screenshots at once)
+    const captureBatch3DPhotos = (options: {
+      vantage: Scenic3DVantagePoint;
+      count: number;
+      includeLightingCycle: boolean;
+    }): Captured3DPhoto[] => {
+      const clampedCount = Math.max(3, Math.min(5, Math.round(options.count)));
+      const currentProps = propsRef.current;
+      const { vantage, includeLightingCycle } = options;
+
+      // Determine center 3D focus point & orbit radius
+      let tx = vantage.targetXZ[0];
+      let tz = vantage.targetXZ[1];
+      let ty =
+        getTerrainElevation(tx, tz, currentProps.terrainPreset) + vantage.targetYOffset;
+      let baseRadius = vantage.baseRadius;
+      let baseHeight = vantage.baseHeight;
+      let startYaw = 0.25;
+
+      if (vantage.id === 'vantage-current') {
+        tx = controls.target.x;
+        ty = controls.target.y;
+        tz = controls.target.z;
+        const dx = camera.position.x - tx;
+        const dz = camera.position.z - tz;
+        baseRadius = Math.max(28, Math.min(145, Math.hypot(dx, dz)));
+        baseHeight = Math.max(16, Math.min(110, camera.position.y - ty));
+        startYaw = Math.atan2(dx, dz);
+      }
+
+      const angleConfigs = [
+        {
+          label: 'Front Hero Architectural View',
+          yawOffset: 0.0,
+          radiusMult: 1.05,
+          heightMult: 0.96,
+          cycleHour: 13.5,
+        },
+        {
+          label: '45° Isometric Quad & Roofline Orbit',
+          yawOffset: 0.78,
+          radiusMult: 1.15,
+          heightMult: 1.22,
+          cycleHour: 17.75,
+        },
+        {
+          label: 'Nocturnal Architectural Perspective',
+          yawOffset: -0.58,
+          radiusMult: 1.12,
+          heightMult: 0.88,
+          cycleHour: 22.5,
+        },
+        {
+          label: 'High Drone Topographic Overview',
+          yawOffset: 1.52,
+          radiusMult: 1.36,
+          heightMult: 1.68,
+          cycleHour: 15.25,
+        },
+        {
+          label: 'Reverse Skyline & River Horizon',
+          yawOffset: -1.55,
+          radiusMult: 1.22,
+          heightMult: 1.18,
+          cycleHour: 18.25,
+        },
+      ];
+
+      const savedCamPos = camera.position.clone();
+      const savedTarget = controls.target.clone();
+      const captured: Captured3DPhoto[] = [];
+
+      const srcW = renderer.domElement.width || 1280;
+      const srcH = renderer.domElement.height || 720;
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = srcW;
+      outCanvas.height = srcH;
+      const ctx = outCanvas.getContext('2d');
+
+      for (let i = 0; i < clampedCount; i++) {
+        const cfg = angleConfigs[i % angleConfigs.length];
+        const shotHour = includeLightingCycle ? cfg.cycleHour : currentProps.solarHour;
+        const shotSun = calculateSunState(shotHour);
+
+        // Apply shot lighting with dedicated sceneBgColor
+        sunLight.position.set(...shotSun.sunPosition);
+        sunLight.intensity = shotSun.sunIntensity;
+        sunLight.color.set(shotSun.sunColorHex);
+        hemiLight.color.set(shotSun.hemiSkyHex);
+        hemiLight.groundColor.set(shotSun.hemiGroundHex);
+        hemiLight.intensity = shotSun.hemiIntensity;
+        renderer.toneMappingExposure = shotSun.isNight
+          ? 0.68
+          : shotSun.isGoldenHour
+            ? 0.76
+            : 0.82;
+        lampBulbMat.emissiveIntensity = shotSun.isNight
+          ? 1.15
+          : shotSun.isGoldenHour
+            ? 0.55
+            : 0.02;
+        buildingsRoot.children.forEach((bGroup) => {
+          const hullMesh = bGroup.children[2] as THREE.Mesh | undefined;
+          if (hullMesh && hullMesh.material instanceof THREE.MeshStandardMaterial) {
+            hullMesh.material.emissiveIntensity =
+              (currentProps.showBloomAndFog ? currentProps.bloomIntensity * 0.45 : 0.18) *
+              shotSun.windowGlowIntensity;
+          }
+        });
+        sceneBgColor.set(shotSun.fogColorHex);
+        scene.background = sceneBgColor;
+        if (scene.fog instanceof THREE.FogExp2) {
+          scene.fog.color.copy(sceneBgColor);
+          scene.fog.density = currentProps.showBloomAndFog ? shotSun.fogDensity : 0.0004;
+        }
+
+        const yaw = startYaw + cfg.yawOffset;
+        const r = baseRadius * cfg.radiusMult;
+        const cx = Number((tx + Math.sin(yaw) * r).toFixed(1));
+        const cz = Number((tz + Math.cos(yaw) * r).toFixed(1));
+        const minGroundY =
+          getTerrainElevation(cx, cz, currentProps.terrainPreset) + 4.5;
+        const cy = Number(Math.max(minGroundY, ty + baseHeight * cfg.heightMult).toFixed(1));
+
+        camera.position.set(cx, cy, cz);
+        controls.target.set(tx, ty, tz);
+        camera.lookAt(tx, ty, tz);
+        camera.updateMatrixWorld();
+
+        renderer.render(scene, camera);
+
+        let dataUrl = '';
+        if (ctx) {
+          ctx.clearRect(0, 0, srcW, srcH);
+          ctx.drawImage(renderer.domElement, 0, 0, srcW, srcH);
+
+          // Draw clean architectural metadata footer bar on the captured photo
+          const barH = Math.max(38, Math.round(srcH * 0.065));
+          ctx.fillStyle = 'rgba(7, 10, 16, 0.84)';
+          ctx.fillRect(0, srcH - barH, srcW, barH);
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(0, srcH - barH, srcW, 2);
+
+          const fontSizeTitle = Math.max(12, Math.round(barH * 0.36));
+          const fontSizeSub = Math.max(10, Math.round(barH * 0.28));
+          ctx.font = `bold ${fontSizeTitle}px Inter, system-ui, sans-serif`;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(
+            `${vantage.title} — Shot ${i + 1}/${clampedCount}: ${cfg.label}`,
+            16,
+            srcH - barH + Math.round(barH * 0.46)
+          );
+
+          ctx.font = `${fontSizeSub}px JetBrains Mono, monospace`;
+          ctx.fillStyle = '#94a3b8';
+          ctx.fillText(
+            `${shotSun.phaseLabel} (${shotHour.toFixed(2)}h) · 3D Camera XYZ [${cx}, ${cy}, ${cz}] · Target [${tx.toFixed(1)}, ${ty.toFixed(1)}, ${tz.toFixed(1)}]`,
+            16,
+            srcH - barH + Math.round(barH * 0.82)
+          );
+
+          dataUrl = outCanvas.toDataURL('image/png');
+        } else {
+          dataUrl = renderer.domElement.toDataURL('image/png');
+        }
+
+        const safeSlug = vantage.id.replace(/[^a-z0-9-_]/gi, '_');
+        captured.push({
+          id: `photo-${Date.now()}-${i + 1}`,
+          vantageId: vantage.id,
+          vantageTitle: vantage.title,
+          shotNumber: i + 1,
+          totalInBatch: clampedCount,
+          angleLabel: cfg.label,
+          lightingLabel: shotSun.phaseLabel,
+          solarHour: shotHour,
+          cameraCoords: [cx, cy, cz],
+          targetCoords: [
+            Number(tx.toFixed(1)),
+            Number(ty.toFixed(1)),
+            Number(tz.toFixed(1)),
+          ],
+          dataUrl,
+          filename: `London3D_${safeSlug}_Shot${i + 1}of${clampedCount}.png`,
+          selected: true,
+          capturedAt: new Date().toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          }),
+        });
+      }
+
+      // Restore active solarHour lighting and transition camera to the selected vantage hero angle
+      const activeSun = calculateSunState(currentProps.solarHour);
+      sunLight.position.set(...activeSun.sunPosition);
+      sunLight.intensity = activeSun.sunIntensity;
+      sunLight.color.set(activeSun.sunColorHex);
+      hemiLight.color.set(activeSun.hemiSkyHex);
+      hemiLight.groundColor.set(activeSun.hemiGroundHex);
+      hemiLight.intensity = activeSun.hemiIntensity;
+      renderer.toneMappingExposure = activeSun.isNight
+        ? 0.68
+        : activeSun.isGoldenHour
+          ? 0.76
+          : 0.82;
+      sceneBgColor.set(activeSun.fogColorHex);
+      scene.background = sceneBgColor;
+      if (scene.fog instanceof THREE.FogExp2) {
+        scene.fog.color.copy(sceneBgColor);
+        scene.fog.density = currentProps.showBloomAndFog ? activeSun.fogDensity : 0.0004;
+      }
+
+      if (vantage.id === 'vantage-current') {
+        camera.position.copy(savedCamPos);
+        controls.target.copy(savedTarget);
+        controls.update();
+      } else {
+        const heroCfg = angleConfigs[0];
+        const heroYaw = startYaw + heroCfg.yawOffset;
+        const hr = baseRadius * heroCfg.radiusMult;
+        _targetCameraPos.set(
+          tx + Math.sin(heroYaw) * hr,
+          ty + baseHeight * heroCfg.heightMult,
+          tz + Math.cos(heroYaw) * hr
+        );
+        _targetLookAt.set(tx, ty, tz);
+        cameraTransitionActive = !isSoftwareGl;
+        if (isSoftwareGl) {
+          camera.position.copy(_targetCameraPos);
+          controls.target.copy(_targetLookAt);
+          controls.update();
+        }
+      }
+
+      renderer.render(scene, camera);
+
+      return captured;
+    };
+
+    propsRef.current.onRegisterPhotoCapture?.(captureBatch3DPhotos);
 
     tick();
 
@@ -2468,7 +3101,9 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
         {buildings.map((b) => {
           const isSelected = b.id === selectedBuildingId;
           const metrics = getBuildingAggregateMetrics(b);
-          const occPct = Math.round(metrics.occupancyRatio * 100);
+          const occPct = Number.isFinite(metrics.occupancyPct)
+            ? metrics.occupancyPct
+            : Math.round((metrics.occupancyRatio || 0) * 100);
           const dotColor =
             occPct < 45 ? '#22c55e' : occPct <= 70 ? '#f59e0b' : '#ea580c';
           const cleanTitle = b.name.split('(')[0].trim();
@@ -2521,6 +3156,50 @@ export const CampusScene3D: React.FC<CampusScene3DProps> = ({
             <span className="text-slate-400 font-mono-tabular">({lm.accucitiesTileId})</span>
           </div>
         ))}
+
+        {/* Interactive 3D-Projected Badges for River Thames & All 11 Other London Rivers, Canals & Subterranean Streams */}
+        {LONDON_RIVERS_AND_STREAMS_3D.map((waterway) => {
+          const isFocused = focusedRiverId === waterway.id;
+          const isThames = waterway.id === 'river-thames';
+          return (
+            <button
+              key={waterway.id}
+              ref={(el) => {
+                riverPinElementsRef.current[waterway.id] = el;
+              }}
+              type="button"
+              data-testid={`london-river-pin-${waterway.id}`}
+              onClick={() => onSelectRiver?.(waterway.id)}
+              style={{
+                left: 0,
+                top: 0,
+                opacity: 0,
+              }}
+              className={`absolute transition-opacity duration-150 px-2 py-0.5 rounded-md border shadow-lg backdrop-blur-md text-left flex items-center gap-1.5 whitespace-nowrap ${
+                isFocused
+                  ? 'bg-sky-950/95 border-cyan-300 text-white ring-2 ring-cyan-400/50 z-20'
+                  : isThames
+                    ? 'bg-sky-950/90 border-sky-400/80 text-sky-100 hover:border-cyan-300 z-10'
+                    : waterway.type === 'subterranean-stream'
+                      ? 'bg-slate-950/85 border-cyan-500/50 text-cyan-200 hover:border-cyan-300'
+                      : 'bg-slate-950/85 border-teal-500/60 text-teal-100 hover:border-teal-300'
+              }`}
+            >
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: waterway.colorHex }}
+              />
+              <div>
+                <div className="text-[10px] font-bold leading-tight">
+                  {waterway.shortLabel}
+                </div>
+                <div className="text-[8px] font-mono-tabular text-slate-300 leading-tight">
+                  {waterway.statusLabel} · {waterway.realLengthKm} km
+                </div>
+              </div>
+            </button>
+          );
+        })}
 
         {LONDON_UNIVERSITY_GEO_LOCATIONS.map((geo) => {
           const isCurrentCampus = geo.campusId === activeCampusId;

@@ -45,6 +45,7 @@ import {
   FloorPlanExplorerModal,
   StackedBuilding3DPreview,
 } from './FloorPlanExplorerModal';
+import { recordGeminiCallTelemetry } from '../utils/geminiTelemetryTracker';
 
 export type ActiveModalType =
   | 'none'
@@ -78,11 +79,13 @@ export function speakNarrationText(
   text: string,
   onEnd?: () => void,
   voiceName: GeminiNeuralVoiceName = 'aoede-real',
-  onStart?: (engineLabel: string) => void
+  onStart?: (engineLabel: string, durationMs: number) => void,
+  skipArgonRewrite = false
 ) {
   void speakWithGeminiNeuralVoice(text, voiceName, {
     onStart,
     onEnd,
+    skipArgonRewrite,
   });
 }
 
@@ -212,6 +215,9 @@ export const OverlayPanels: React.FC<OverlayPanelsProps> = ({
       if (!response.ok) {
         setAiError(data.error || 'AI Concierge request failed.');
       } else {
+        if (data.telemetry) {
+          recordGeminiCallTelemetry(data.telemetry);
+        }
         setAiResult(data);
         if (data.recommendedBuildingId) {
           onSelectBuildingAndFloor(
@@ -348,6 +354,9 @@ export const OverlayPanels: React.FC<OverlayPanelsProps> = ({
       if (!response.ok) {
         setSynthError(data.error || 'Could not synthesize blueprint.');
       } else {
+        if (data.telemetry) {
+          recordGeminiCallTelemetry(data.telemetry);
+        }
         const formatted = JSON.stringify(data, null, 2);
         setBlueprintInput(formatted);
         const parsed = parseBlueprintToBuilding(formatted, buildings.length);

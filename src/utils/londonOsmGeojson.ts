@@ -832,6 +832,370 @@ export const LONDON_ROYAL_PARKS_3D: LondonRoyalPark3D[] = [
   },
 ];
 
+export type LondonWaterwayType =
+  | 'tidal-river'
+  | 'surface-river'
+  | 'canal'
+  | 'subterranean-stream';
+
+export interface LondonThamesBridge3D {
+  id: string;
+  name: string;
+  shortLabel: string;
+  curveFraction: number;
+  nearCampusId: string;
+}
+
+export const LONDON_THAMES_BRIDGES_3D: LondonThamesBridge3D[] = [
+  {
+    id: 'chelsea-bridge',
+    name: 'Chelsea Bridge (Imperial / Battersea Reach)',
+    shortLabel: 'Chelsea Bridge',
+    curveFraction: 0.2,
+    nearCampusId: 'imperial-south-ken',
+  },
+  {
+    id: 'vauxhall-bridge',
+    name: 'Vauxhall Bridge (River Effra Outfall)',
+    shortLabel: 'Vauxhall Bridge',
+    curveFraction: 0.34,
+    nearCampusId: 'imperial-south-ken',
+  },
+  {
+    id: 'westminster-bridge',
+    name: 'Westminster Bridge (Parliament & South Bank)',
+    shortLabel: 'Westminster Bridge',
+    curveFraction: 0.47,
+    nearCampusId: 'kcl-waterloo-guys',
+  },
+  {
+    id: 'waterloo-bridge',
+    name: 'Waterloo Bridge (KCL Strand ↔ KCL Waterloo Spine)',
+    shortLabel: 'Waterloo Bridge',
+    curveFraction: 0.58,
+    nearCampusId: 'kcl-strand',
+  },
+  {
+    id: 'blackfriars-bridge',
+    name: 'Blackfriars Bridge (River Fleet Outfall & LSE/City)',
+    shortLabel: 'Blackfriars Bridge',
+    curveFraction: 0.67,
+    nearCampusId: 'lse-aldwych-holborn',
+  },
+  {
+    id: 'london-bridge',
+    name: 'London Bridge (KCL Guy’s Campus & The Shard)',
+    shortLabel: 'London Bridge',
+    curveFraction: 0.77,
+    nearCampusId: 'kcl-waterloo-guys',
+  },
+  {
+    id: 'tower-bridge',
+    name: 'Tower Bridge (Pool of London & St Saviour’s Dock)',
+    shortLabel: 'Tower Bridge',
+    curveFraction: 0.86,
+    nearCampusId: 'kcl-waterloo-guys',
+  },
+];
+
+export interface LondonWaterway3D {
+  id: string;
+  name: string;
+  shortLabel: string;
+  type: LondonWaterwayType;
+  statusLabel: string;
+  widthSceneUnits: number;
+  realLengthKm: number;
+  flowDirection: string;
+  colorHex: string;
+  emissiveHex: string;
+  nearCampusIds: string[];
+  description: string;
+  pathXZ: [number, number][];
+  labelXZ: [number, number];
+}
+
+export const LONDON_RIVERS_AND_STREAMS_3D: LondonWaterway3D[] = [
+  {
+    id: 'river-thames',
+    name: 'River Thames (Main Tidal Channel through Central London)',
+    shortLabel: '🌊 River Thames (W → E)',
+    type: 'tidal-river',
+    statusLabel: 'Primary Tidal River',
+    widthSceneUnits: 12.6,
+    realLengthKm: 346,
+    flowDirection: 'West (Chelsea / Battersea) → East (Westminster, KCL Strand, Waterloo, City & Greenwich)',
+    colorHex: '#0284c7',
+    emissiveHex: '#0369a1',
+    nearCampusIds: ['kcl-strand', 'kcl-waterloo-guys', 'lse-aldwych-holborn', 'imperial-south-ken'],
+    description:
+      'London’s primary tidal artery separating the North Bank (KCL Strand, LSE, UCL, Imperial) from the South Bank (KCL Waterloo & Guy’s). Crossed by 7 iconic bridges.',
+    pathXZ: RIVER_THAMES_SCENE_XZ_PATH,
+    labelXZ: [44, 38],
+  },
+  {
+    id: 'river-lea-waterworks',
+    name: 'River Lea (Lee Navigation) & Waterworks River (UCL East Olympic Park)',
+    shortLabel: '🌊 River Lea & Waterworks',
+    type: 'surface-river',
+    statusLabel: 'Surface River & Navigation',
+    widthSceneUnits: 4.8,
+    realLengthKm: 68,
+    flowDirection: 'North (Hackney Marshes) → South through UCL East Olympic Park → Thames at Bow Creek',
+    colorHex: '#0891b2',
+    emissiveHex: '#06b6d4',
+    nearCampusIds: ['ucl-east'],
+    description:
+      'Flows directly between UCL East Marshgate and One Pool Street inside Queen Elizabeth Olympic Park in Stratford before joining the River Thames at Bow Creek.',
+    pathXZ: [
+      [92, -118],
+      [95, -88],
+      [98, -54],
+      [104, -22],
+      [114, 4],
+      [126, 24],
+    ],
+    labelXZ: [99, -50],
+  },
+  {
+    id: 'regents-canal',
+    name: 'Regent’s Canal (Little Venice → Camden → King’s Cross → Limehouse)',
+    shortLabel: '🛶 Regent’s Canal',
+    type: 'canal',
+    statusLabel: 'Surface Canal Waterway',
+    widthSceneUnits: 3.6,
+    realLengthKm: 13.8,
+    flowDirection: 'West (Paddington) → East past Regent’s Park & UCL North → Thames at Limehouse Basin',
+    colorHex: '#0d9488',
+    emissiveHex: '#14b8a6',
+    nearCampusIds: ['ucl-bloomsbury', 'ucl-east'],
+    description:
+      'Historic 1820 canal curving around Regent’s Park and Camden Lock just north of UCL Bloomsbury, passing King’s Cross and Mile End to enter the Thames at Limehouse.',
+    pathXZ: [
+      [-88, -56],
+      [-52, -74],
+      [-18, -84],
+      [12, -82],
+      [38, -74],
+      [68, -62],
+      [96, -34],
+      [114, 2],
+      [118, 25],
+    ],
+    labelXZ: [12, -82],
+  },
+  {
+    id: 'river-fleet',
+    name: 'River Fleet (Hampstead → Camden → King’s Cross / UCL → Fleet St / LSE → Blackfriars)',
+    shortLabel: '💧 River Fleet (Subterranean)',
+    type: 'subterranean-stream',
+    statusLabel: 'Subterranean Lost River',
+    widthSceneUnits: 3.1,
+    realLengthKm: 6.5,
+    flowDirection: 'North (Hampstead Heath) → South between UCL Bloomsbury & LSE → Thames at Blackfriars Bridge',
+    colorHex: '#38bdf8',
+    emissiveHex: '#0ea5e9',
+    nearCampusIds: ['ucl-bloomsbury', 'lse-aldwych-holborn', 'kcl-strand'],
+    description:
+      'London’s largest subterranean “Lost River”. Flows beneath St Pancras and King’s Cross just east of UCL Bloomsbury, down Farringdon Road past LSE and Fleet Street into the Thames under Blackfriars Bridge.',
+    pathXZ: [
+      [16, -114],
+      [22, -84],
+      [27, -52],
+      [38, -28],
+      [50, -6],
+      [58, 16],
+      [64, 35],
+    ],
+    labelXZ: [38, -28],
+  },
+  {
+    id: 'river-westbourne-serpentine',
+    name: 'River Westbourne & Hyde Park Serpentine (Paddington → Imperial / Hyde Park → Chelsea)',
+    shortLabel: '🦢 River Westbourne & Serpentine',
+    type: 'surface-river',
+    statusLabel: 'Park Lake & Culvert Stream',
+    widthSceneUnits: 4.2,
+    realLengthKm: 9.8,
+    flowDirection: 'North (Hampstead / Paddington) → South via Hyde Park Serpentine (Imperial) → Thames at Chelsea',
+    colorHex: '#22d3ee',
+    emissiveHex: '#06b6d4',
+    nearCampusIds: ['imperial-south-ken'],
+    description:
+      'Feeds the famous Serpentine & Long Water lakes in Hyde Park & Kensington Gardens immediately north of Imperial College South Kensington, before flowing in a pipe above Sloane Square platform to the Thames.',
+    pathXZ: [
+      [-68, -88],
+      [-64, -46],
+      [-56, -12],
+      [-52, 8],
+      [-54, 30],
+      [-52, 52],
+      [-50, 70],
+    ],
+    labelXZ: [-53, 8],
+  },
+  {
+    id: 'river-tyburn',
+    name: 'River Tyburn (Regent’s Park → Marylebone → Mayfair → Westminster Thames)',
+    shortLabel: '💧 River Tyburn (Subterranean)',
+    type: 'subterranean-stream',
+    statusLabel: 'Subterranean Lost River',
+    widthSceneUnits: 2.7,
+    realLengthKm: 6.2,
+    flowDirection: 'North (Hampstead / Regent’s Park) → South via Marylebone & Mayfair → Thames at Westminster',
+    colorHex: '#60a5fa',
+    emissiveHex: '#3b82f6',
+    nearCampusIds: ['ucl-bloomsbury'],
+    description:
+      'Subterranean stream flowing south from Regent’s Park boating lake along winding Marylebone Lane (west of UCL Bloomsbury), through Mayfair and directly beneath Buckingham Palace to the Thames.',
+    pathXZ: [
+      [-22, -108],
+      [-18, -74],
+      [-15, -42],
+      [-13, -12],
+      [-10, 18],
+      [-8, 42],
+      [-6, 63],
+    ],
+    labelXZ: [-14, -24],
+  },
+  {
+    id: 'river-walbrook',
+    name: 'River Walbrook (Moorfields → Bank of England / City → Cannon St Thames)',
+    shortLabel: '💧 River Walbrook (Roman Stream)',
+    type: 'subterranean-stream',
+    statusLabel: 'Subterranean Roman Stream',
+    widthSceneUnits: 2.6,
+    realLengthKm: 3.5,
+    flowDirection: 'North (Finsbury / Moorfields) → South through Roman Londinium & Bank → Thames at Cannon St',
+    colorHex: '#38bdf8',
+    emissiveHex: '#0284c7',
+    nearCampusIds: ['lse-aldwych-holborn', 'kcl-strand'],
+    description:
+      'Ancient freshwater stream around which the Romans founded Londinium. Flows underground beneath Moorgate and the Bank of England into the Thames beside Cannon Street railway bridge.',
+    pathXZ: [
+      [78, -52],
+      [77, -26],
+      [76, -4],
+      [76, 16],
+      [76, 32],
+    ],
+    labelXZ: [76, -4],
+  },
+  {
+    id: 'counters-creek',
+    name: 'Counter’s Creek / Stamford Brook (Kensal Green → Imperial White City → Chelsea Creek)',
+    shortLabel: '💧 Counter’s Creek (White City)',
+    type: 'subterranean-stream',
+    statusLabel: 'West London Culvert Stream',
+    widthSceneUnits: 2.8,
+    realLengthKm: 7.4,
+    flowDirection: 'North (Kensal Green) → South past Imperial White City & Olympia → Thames at Chelsea Creek',
+    colorHex: '#818cf8',
+    emissiveHex: '#6366f1',
+    nearCampusIds: ['imperial-white-city', 'imperial-south-ken'],
+    description:
+      'West London stream running directly along the eastern edge of Imperial College White City campus and the West London Line railway down to Chelsea Creek on the Thames.',
+    pathXZ: [
+      [-102, -76],
+      [-95, -46],
+      [-92, -18],
+      [-91, 14],
+      [-90, 44],
+      [-88, 72],
+    ],
+    labelXZ: [-92, -12],
+  },
+  {
+    id: 'river-effra',
+    name: 'River Effra (Dulwich / Brixton → Oval → Vauxhall Bridge Thames)',
+    shortLabel: '💧 River Effra (South Bank)',
+    type: 'subterranean-stream',
+    statusLabel: 'South London Lost River',
+    widthSceneUnits: 2.9,
+    realLengthKm: 8.8,
+    flowDirection: 'South (Crystal Palace / Brixton) → North via Oval → Thames at Vauxhall Bridge',
+    colorHex: '#2dd4bf',
+    emissiveHex: '#14b8a6',
+    nearCampusIds: ['kcl-waterloo-guys'],
+    description:
+      'Major South London underground river rising in Upper Norwood and flowing north beneath Brixton and The Oval cricket ground to discharge into the Thames at Vauxhall Bridge.',
+    pathXZ: [
+      [18, 126],
+      [12, 104],
+      [4, 84],
+      [-6, 65],
+    ],
+    labelXZ: [6, 92],
+  },
+  {
+    id: 'river-neckinger',
+    name: 'River Neckinger & Earl’s Sluice (Southwark / KCL Guy’s → St Saviour’s Dock Thames)',
+    shortLabel: '💧 River Neckinger (Southwark)',
+    type: 'subterranean-stream',
+    statusLabel: 'Southwark Subterranean Stream',
+    widthSceneUnits: 2.7,
+    realLengthKm: 4.6,
+    flowDirection: 'South (Elephant & Castle) → North past KCL Waterloo & Guy’s → Thames at St Saviour’s Dock',
+    colorHex: '#34d399',
+    emissiveHex: '#10b981',
+    nearCampusIds: ['kcl-waterloo-guys'],
+    description:
+      'Historic Southwark stream flowing from Lambeth and Elephant & Castle past KCL Waterloo and Guy’s Campus in Bermondsey to enter the Thames at St Saviour’s Dock just east of Tower Bridge.',
+    pathXZ: [
+      [50, 108],
+      [60, 82],
+      [74, 56],
+      [88, 31],
+    ],
+    labelXZ: [66, 74],
+  },
+  {
+    id: 'river-wandle',
+    name: 'River Wandle (Wimbledon / Earlsfield → Wandsworth Thames)',
+    shortLabel: '🌊 River Wandle (SW Chalk Stream)',
+    type: 'surface-river',
+    statusLabel: 'Surface Chalk Stream',
+    widthSceneUnits: 3.5,
+    realLengthKm: 14.5,
+    flowDirection: 'South (Croydon / Wimbledon) → North to Thames at Wandsworth Reach',
+    colorHex: '#0ea5e9',
+    emissiveHex: '#0284c7',
+    nearCampusIds: ['imperial-south-ken'],
+    description:
+      'Crystal-clear South-West London chalk stream flowing north through Merton and Wandsworth into the tidal River Thames.',
+    pathXZ: [
+      [-74, 126],
+      [-70, 104],
+      [-66, 88],
+      [-62, 72],
+    ],
+    labelXZ: [-68, 98],
+  },
+  {
+    id: 'river-ravensbourne',
+    name: 'River Ravensbourne & Deptford Creek (Lewisham / Greenwich → Thames)',
+    shortLabel: '🌊 Ravensbourne / Deptford Creek',
+    type: 'surface-river',
+    statusLabel: 'Tidal Creek & Surface River',
+    widthSceneUnits: 3.8,
+    realLengthKm: 17.4,
+    flowDirection: 'South (Bromley / Lewisham) → North via Deptford Creek into Thames at Greenwich',
+    colorHex: '#0284c7',
+    emissiveHex: '#0369a1',
+    nearCampusIds: ['kcl-waterloo-guys', 'ucl-east'],
+    description:
+      'South-East London river becoming the tidal Deptford Creek before joining the River Thames near Greenwich Reach.',
+    pathXZ: [
+      [126, 118],
+      [122, 88],
+      [118, 56],
+      [116, 26],
+    ],
+    labelXZ: [120, 72],
+  },
+];
+
 export function exportCampusOsmGeoJson(geo: UniversityGeoLocation): string {
   const features = geo.osmFootprints.map((fp) => {
     const ringLngLat = fp.polygonMeters.map(([mx, mz]) => {
