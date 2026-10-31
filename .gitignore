@@ -6,7 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
-.aistuio
+.aistudio
 .claude
 .gemini
 .vscode
