@@ -1,0 +1,6 @@
+{
+  "name": "CampusExplorer 3D FX",
+  "description": "Immersive Three.js 3D campus digital twin and Gemini AI voice-and-text study space concierge with real-time volumetric lighting, London university vector maps, occupancy heatmaps, and spatial audio.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
