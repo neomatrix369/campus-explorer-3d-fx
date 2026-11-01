@@ -142,6 +142,12 @@ Click **`AI Cost`** in the top navigation bar or **`🤖 AI Cost`** in the Right
 # Required for server-side Gemini AI Concierge, 3D Extruder & 24kHz Neural TTS
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 
+# Local host URL. Use http://localhost:3000 (or the port printed at startup).
+APP_URL="http://localhost:3000"
+
+# HTTP port. Default 3000. If occupied, the server picks the next free port.
+PORT=3000
+
 # Optional: Google Maps Platform API Key for live interactive Satellite / Hybrid / 3D Map tiles
 VITE_GOOGLE_MAPS_API_KEY="YOUR_GOOGLE_MAPS_API_KEY"
 ```
@@ -151,11 +157,14 @@ VITE_GOOGLE_MAPS_API_KEY="YOUR_GOOGLE_MAPS_API_KEY"
 # Install dependencies
 npm install
 
-# Start full-stack Express + Vite server on http://localhost:3000
+# Start full-stack Express + Vite server (default http://localhost:3000)
 npm run dev
 
-# Run pure-logic & lighting calibration unit tests (9/9 passing)
-npx tsx --test src/utils/campusLogic.test.ts
+# Custom port (CLI wins over PORT in .env). Also accepts -p 4000 or --port=4000
+npm run dev -- --port 4000
+
+# Run pure-logic, lighting, and listen-port unit tests
+npm test
 
 # Type-check and build production bundle
 npm run build
