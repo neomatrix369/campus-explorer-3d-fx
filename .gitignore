@@ -11,3 +11,4 @@ coverage/
 .gemini
 .vscode
 .omc
+.test-results/
