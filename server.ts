@@ -4,13 +4,12 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { listenOnFirstAvailable, resolvePreferredPort } from './src/utils/listenPort.ts';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const PORT = 3000;
 
 function getGenAIClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -82,6 +81,15 @@ function buildModelTelemetry(
 }
 
 async function startServer() {
+  let requestedPort: number;
+  try {
+    requestedPort = resolvePreferredPort(process.argv, process.env);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+    return;
+  }
+
   const app = express();
   app.use(express.json({ limit: '2mb' }));
 
@@ -643,9 +651,14 @@ Select the single best buildingId and floorNumber from the telemetry that matche
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CampusExplorer 3D FX server running at http://localhost:${PORT}`);
-  });
+  const { port } = await listenOnFirstAvailable(app, requestedPort);
+  if (port !== requestedPort) {
+    console.warn(`Port ${requestedPort} is in use — switched to ${port}.`);
+  }
+  console.log(`CampusExplorer 3D FX server running at http://localhost:${port}`);
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+});
